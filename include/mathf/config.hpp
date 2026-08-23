@@ -54,8 +54,10 @@
 #  define MATHF_COMPILER_GCC 0
 #endif
 
-// True only for genuine MSVC. clang-cl defines _MSC_VER too but follows Clang
-// semantics for intrinsic types -- notably __m128 lane access (see below).
+// True only for genuine MSVC, where the intrinsic vector types are magic unions
+// (__m128 with .m128_f32[], __n128 with .n128_f32[]) rather than native vector
+// types. Lane access must go through those members. clang-cl defines _MSC_VER
+// too but follows Clang semantics, where the same types are subscriptable.
 #define MATHF_MSVC_INTRINSIC_UNION (MATHF_COMPILER_MSVC && !MATHF_COMPILER_CLANG)
 
 // ---------------------------------------------------------- inline & callconv
@@ -72,11 +74,18 @@
 
 // __vectorcall keeps VecReg in xmm registers across non-inlined boundaries,
 // matching DirectXMath's XM_CALLCONV. On SysV the default ABI already does this.
+//
+// _M_ARM64EC must be excluded explicitly: ARM64EC defines _M_X64 for x64
+// source compatibility while leaving _M_ARM64 undefined, so testing only for
+// those two would enable __vectorcall on a target whose VecReg is backed by
+// float32x4_t. DirectXMath's XM_CALLCONV excludes it for the same reason.
 #if defined(_M_X64) && (MATHF_COMPILER_MSVC || MATHF_COMPILER_CLANG) \
-    && !defined(_M_ARM64) && !defined(MATHF_NO_VECTORCALL)
+    && !defined(_M_ARM64) && !defined(_M_ARM64EC) && !defined(MATHF_NO_VECTORCALL)
 #  define MATHF_CALL __vectorcall
+#  define MATHF_CALL_NAME "__vectorcall"
 #else
 #  define MATHF_CALL
+#  define MATHF_CALL_NAME "default"
 #endif
 
 // ---------------------------------------------------------------- architecture

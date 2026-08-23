@@ -40,13 +40,22 @@ endif()
 # Applied to our own targets only, never propagated to consumers of mathf.
 add_library(mathf_build_settings INTERFACE)
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|x64|X64|i[3-6]86")
+    set(MATHF_TARGET_IS_X86 ON)
+else()
+    set(MATHF_TARGET_IS_X86 OFF)
+endif()
+
 if(MSVC)
     # /utf-8 is required: without it MSVC reads sources in the system code page
     # and warns (C4819) on any non-ASCII character, including em-dashes in comments.
     target_compile_options(mathf_build_settings INTERFACE
         /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /EHsc /utf-8)
     # AVX2 implies FMA; the codegen spike measured all baselines at this level.
-    if(NOT MATHF_FORCE_SCALAR)
+    # Must be gated on the target architecture, not just on MATHF_FORCE_SCALAR:
+    # /arch:AVX2 is an x86/x64-only option and cl.exe rejects it outright when
+    # targeting ARM64, breaking the build before any NEON code is reached.
+    if(NOT MATHF_FORCE_SCALAR AND MATHF_TARGET_IS_X86)
         target_compile_options(mathf_build_settings INTERFACE /arch:AVX2)
     endif()
     target_compile_options(mathf_build_settings INTERFACE
@@ -54,7 +63,7 @@ if(MSVC)
 else()
     target_compile_options(mathf_build_settings INTERFACE
         -Wall -Wextra -Wpedantic)
-    if(NOT MATHF_FORCE_SCALAR AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    if(NOT MATHF_FORCE_SCALAR AND MATHF_TARGET_IS_X86)
         target_compile_options(mathf_build_settings INTERFACE -mavx2 -mfma)
     endif()
     target_compile_options(mathf_build_settings INTERFACE
@@ -80,9 +89,16 @@ add_library(mathf_fp_precise INTERFACE)
 if(MSVC)
     target_compile_options(mathf_fp_fast INTERFACE /fp:fast)
     target_compile_options(mathf_fp_precise INTERFACE /fp:precise)
-else()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(mathf_fp_fast INTERFACE -ffast-math)
     target_compile_options(mathf_fp_precise INTERFACE -ffp-model=precise)
+else()
+    # GCC has no -ffp-model=; it rejects the flag outright. The two behaviours
+    # the tests actually depend on -- no FMA contraction and no reciprocal
+    # approximation for division -- are spelled separately here.
+    target_compile_options(mathf_fp_fast INTERFACE -ffast-math)
+    target_compile_options(mathf_fp_precise INTERFACE
+        -fno-fast-math -ffp-contract=off)
 endif()
 
 # ------------------------------------------------------------- DirectXMath dep

@@ -22,5 +22,16 @@ clang-cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /c "%SRC%codegen_vs_dx
    /FA /Facodegen_clang.asm /Focodegen_clang.obj >codegen_clang.log 2>&1
 if exist codegen_clang.asm ( echo   [ OK ] codegen_clang.asm ) else ( echo   [FAIL] see codegen_clang.log )
 
+REM The prototypes above are historical; this one checks the shipping headers.
+echo === library vs DirectXMath (MSVC) ===
+cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%SRC%..\include" ^
+   /c "%SRC%codegen_library.cpp" /FAs /Falibrary_msvc.asm /Folibrary_msvc.obj >library_msvc.log 2>&1
+if exist library_msvc.asm ( echo   [ OK ] library_msvc.asm ) else ( echo   [FAIL] see library_msvc.log )
+
+echo === library vs DirectXMath (clang-cl) ===
+clang-cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%SRC%..\include" ^
+   /c "%SRC%codegen_library.cpp" /FA /Falibrary_clang.asm /Folibrary_clang.obj >library_clang.log 2>&1
+if exist library_clang.asm ( echo   [ OK ] library_clang.asm ) else ( echo   [FAIL] see library_clang.log )
+
 popd
 echo Output: %OUT%

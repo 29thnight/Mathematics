@@ -43,9 +43,18 @@ struct VecReg {
 // is a native vector type. Reading lanes any other way breaks one compiler or the
 // other, so constant-evaluated code must route through these two helpers.
 // See docs/SPIKE-RESULTS.md §1.
+// NOT VERIFIED ON MSVC/ARM64: no ARM toolchain was available when this was
+// written, so the __n128 branch rests on MSVC's documented layout and is first
+// exercised by CI. The Clang/GCC NEON branch is likewise CI-verified only.
+//
+// Deliberately not written with vst1q_f32/vld1q_f32, which would be the obvious
+// portable spelling: those are not constant-evaluable, and these two helpers
+// exist specifically to serve the compile-time path.
 MATHF_NODISCARD MATHF_INLINE constexpr float Lane(const VecReg& r, int i) noexcept {
-#if MATHF_SIMD_SSE && MATHF_MSVC_INTRINSIC_UNION
+#if MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_SSE
     return r.v.m128_f32[i];
+#elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
+    return r.v.n128_f32[i];
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
     return r.v[i];
 #else
@@ -54,8 +63,10 @@ MATHF_NODISCARD MATHF_INLINE constexpr float Lane(const VecReg& r, int i) noexce
 }
 
 MATHF_INLINE constexpr void SetLane(VecReg& r, int i, float x) noexcept {
-#if MATHF_SIMD_SSE && MATHF_MSVC_INTRINSIC_UNION
+#if MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_SSE
     r.v.m128_f32[i] = x;
+#elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
+    r.v.n128_f32[i] = x;
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
     r.v[i] = x;
 #else
@@ -67,9 +78,24 @@ MATHF_INLINE constexpr void SetLane(VecReg& r, int i, float x) noexcept {
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Set(float x, float y, float z, float w) noexcept {
     MATHF_IF_CONSTEVAL {
-        VecReg r{};
-        SetLane(r, 0, x); SetLane(r, 1, y); SetLane(r, 2, z); SetLane(r, 3, w);
-        return r;
+        // Aggregate-initialized rather than default-constructed and then written
+        // lane by lane. The mutate-in-place form leaves an indexable array in the
+        // frame, which makes MSVC's /GS analysis insert a stack cookie -- and
+        // because these functions are force-inlined, that cookie propagates into
+        // the caller even though the branch is dead at runtime. Measured: a
+        // 64-iteration caller went from 70 instructions (DirectXMath parity) to
+        // 77 with two __security_cookie references.
+#if MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_SSE
+        return VecReg{__m128{x, y, z, w}};
+#elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
+        return VecReg{__n128{x, y, z, w}};
+#elif MATHF_SIMD_SSE
+        return VecReg{__m128{x, y, z, w}};
+#elif MATHF_SIMD_NEON
+        return VecReg{float32x4_t{x, y, z, w}};
+#else
+        return VecReg{RegNative{{x, y, z, w}}};
+#endif
     }
 #if MATHF_SIMD_SSE
     return VecReg{_mm_set_ps(w, z, y, x)};   // _mm_set_ps takes reverse lane order
@@ -100,63 +126,75 @@ MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL Zero() noexcept {
 }
 
 // ------------------------------------------------------------------ arithmetic
+// Each operation states its scalar semantics exactly once, above the backend
+// selection, so the compile-time path and the scalar fallback cannot drift apart
+// from each other or between backends as operations are edited.
+namespace detail {
+
+// Fully unrolled with literal lane indices, and building the result through Set
+// rather than mutating one in place -- both for the /GS reason described in Set.
+template <typename Op>
+MATHF_NODISCARD MATHF_INLINE constexpr VecReg ApplyLanewise(VecReg a, VecReg b,
+                                                            Op op) noexcept {
+    return Set(op(Lane(a, 0), Lane(b, 0)), op(Lane(a, 1), Lane(b, 1)),
+               op(Lane(a, 2), Lane(b, 2)), op(Lane(a, 3), Lane(b, 3)));
+}
+
+} // namespace detail
+
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Add(VecReg a, VecReg b) noexcept {
+    const auto scalar = [](float x, float y) noexcept { return x + y; };
 #if MATHF_SIMD_SSE
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) + Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{_mm_add_ps(a.v, b.v)};
 #elif MATHF_SIMD_NEON
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) + Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{vaddq_f32(a.v, b.v)};
 #else
-    VecReg r{};
-    for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) + Lane(b, i));
-    return r;
+    return detail::ApplyLanewise(a, b, scalar);
 #endif
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Sub(VecReg a, VecReg b) noexcept {
+    const auto scalar = [](float x, float y) noexcept { return x - y; };
 #if MATHF_SIMD_SSE
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) - Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{_mm_sub_ps(a.v, b.v)};
 #elif MATHF_SIMD_NEON
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) - Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{vsubq_f32(a.v, b.v)};
 #else
-    VecReg r{};
-    for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) - Lane(b, i));
-    return r;
+    return detail::ApplyLanewise(a, b, scalar);
 #endif
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Mul(VecReg a, VecReg b) noexcept {
+    const auto scalar = [](float x, float y) noexcept { return x * y; };
 #if MATHF_SIMD_SSE
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) * Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{_mm_mul_ps(a.v, b.v)};
 #elif MATHF_SIMD_NEON
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) * Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{vmulq_f32(a.v, b.v)};
 #else
-    VecReg r{};
-    for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) * Lane(b, i));
-    return r;
+    return detail::ApplyLanewise(a, b, scalar);
 #endif
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Div(VecReg a, VecReg b) noexcept {
+    const auto scalar = [](float x, float y) noexcept { return x / y; };
 #if MATHF_SIMD_SSE
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) / Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{_mm_div_ps(a.v, b.v)};
 #elif MATHF_SIMD_NEON
-    MATHF_IF_CONSTEVAL { VecReg r{}; for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) / Lane(b, i)); return r; }
+    MATHF_IF_CONSTEVAL { return detail::ApplyLanewise(a, b, scalar); }
     return VecReg{vdivq_f32(a.v, b.v)};
 #else
-    VecReg r{};
-    for (int i = 0; i < 4; ++i) SetLane(r, i, Lane(a, i) / Lane(b, i));
-    return r;
+    return detail::ApplyLanewise(a, b, scalar);
 #endif
 }
 
@@ -180,13 +218,19 @@ MulAdd(VecReg a, VecReg b, VecReg c) noexcept {
 // Returns the 4-component dot product splatted across all lanes.
 // SSE4.1's dpps does this in one instruction; without it the fallback costs three
 // and loses to DirectXMath (docs/SPIKE-RESULTS.md §4).
+namespace detail {
+
+MATHF_NODISCARD MATHF_INLINE constexpr VecReg Dot4Scalar(VecReg a, VecReg b) noexcept {
+    const float s = Lane(a, 0) * Lane(b, 0) + Lane(a, 1) * Lane(b, 1)
+                  + Lane(a, 2) * Lane(b, 2) + Lane(a, 3) * Lane(b, 3);
+    return Splat(s);
+}
+
+} // namespace detail
+
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Dot4(VecReg a, VecReg b) noexcept {
-    MATHF_IF_CONSTEVAL {
-        float s = 0.0f;
-        for (int i = 0; i < 4; ++i) s += Lane(a, i) * Lane(b, i);
-        return Splat(s);
-    }
+    MATHF_IF_CONSTEVAL { return detail::Dot4Scalar(a, b); }
 #if MATHF_SIMD_SSE && MATHF_HAS_SSE4
     return VecReg{_mm_dp_ps(a.v, b.v, 0xFF)};
 #elif MATHF_SIMD_SSE
@@ -196,9 +240,7 @@ Dot4(VecReg a, VecReg b) noexcept {
 #elif MATHF_SIMD_NEON
     return VecReg{vdupq_n_f32(vaddvq_f32(vmulq_f32(a.v, b.v)))};
 #else
-    float s = 0.0f;
-    for (int i = 0; i < 4; ++i) s += Lane(a, i) * Lane(b, i);
-    return Splat(s);
+    return detail::Dot4Scalar(a, b);
 #endif
 }
 

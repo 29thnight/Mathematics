@@ -28,13 +28,11 @@ int main() {
     std::printf("  FMA           : %s\n", MATHF_HAS_FMA ? "yes" : "no");
 
     std::printf("intrinsic union : %s\n",
-                MATHF_MSVC_INTRINSIC_UNION ? "yes (MSVC __m128 lanes via m128_f32)"
+                MATHF_MSVC_INTRINSIC_UNION ? "yes (MSVC lanes via m128_f32/n128_f32)"
                                            : "no (native vector subscript)");
-#if defined(_M_X64) && !defined(MATHF_NO_VECTORCALL)
-    std::printf("call convention : __vectorcall\n");
-#else
-    std::printf("call convention : default\n");
-#endif
+    // Printed from config.hpp's own macro rather than re-deriving the condition,
+    // so this report cannot drift away from what the library actually uses.
+    std::printf("call convention : %s\n", MATHF_CALL_NAME);
 
     // A scalar backend on a SIMD-capable host means the detection logic broke.
     if (MATHF_SIMD_SCALAR && (MATHF_ARCH_X86 || MATHF_ARCH_ARM64)) {
