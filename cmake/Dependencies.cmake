@@ -24,6 +24,17 @@ function(mathf_relax_warnings)
     endforeach()
 endfunction()
 
+# Fetched targets land in the generated Visual Studio solution alongside ours.
+# Filing them under one folder keeps Solution Explorer readable; on generators
+# without folders the property is simply ignored.
+function(mathf_group_third_party)
+    foreach(target IN LISTS ARGN)
+        if(TARGET ${target})
+            set_target_properties(${target} PROPERTIES FOLDER "ThirdParty")
+        endif()
+    endforeach()
+endfunction()
+
 # ------------------------------------------------------------------ GoogleTest
 function(mathf_fetch_googletest)
     FetchContent_Declare(googletest
@@ -35,6 +46,7 @@ function(mathf_fetch_googletest)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     mathf_relax_warnings(gtest gtest_main gmock gmock_main)
+    mathf_group_third_party(gtest gtest_main gmock gmock_main)
 endfunction()
 
 # ------------------------------------------------------------- Google Benchmark
@@ -49,6 +61,7 @@ function(mathf_fetch_benchmark)
     set(BENCHMARK_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(benchmark)
     mathf_relax_warnings(benchmark benchmark_main)
+    mathf_group_third_party(benchmark benchmark_main)
 endfunction()
 
 # ------------------------------------------------------------------------- GLM

@@ -22,6 +22,10 @@ option(MATHF_BUILD_BENCH  "Build Mathf benchmarks" ${MATHF_IS_TOP_LEVEL})
 option(MATHF_BUILD_TOOLS  "Build Mathf tools"      ${MATHF_IS_TOP_LEVEL})
 option(MATHF_FORCE_SCALAR "Force the scalar SIMD fallback (for CI coverage)" OFF)
 
+# Group targets into folders in IDEs that have them (Visual Studio, Xcode).
+# Ignored by every other generator.
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 # ----------------------------------------------------------------- the library
 add_library(mathf INTERFACE)
 add_library(Mathf::mathf ALIAS mathf)
@@ -119,6 +123,37 @@ endif()
 
 if(MATHF_BUILD_BENCH)
     add_subdirectory(bench)
+endif()
+
+# ------------------------------------------------------------------ IDE layout
+# None of this affects the build. It exists so the generated Visual Studio
+# solution is actually usable: a header-only library contributes no project of
+# its own, and F5 in a freshly generated solution runs nothing unless a startup
+# project is named. Kept at the bottom because it inspects targets the
+# subdirectories above create.
+if(MATHF_IS_TOP_LEVEL)
+    file(GLOB_RECURSE MATHF_PUBLIC_HEADERS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/mathf/*.hpp")
+
+    # A utility target, not a build target: it compiles nothing and only carries
+    # the headers so they are browsable and searchable in Solution Explorer.
+    add_custom_target(mathf_headers SOURCES ${MATHF_PUBLIC_HEADERS})
+    source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        PREFIX "include" FILES ${MATHF_PUBLIC_HEADERS})
+
+    foreach(mathf_target IN ITEMS
+            mathf_headers mathf_config_report mathf_tests mathf_bench)
+        if(TARGET ${mathf_target})
+            set_target_properties(${mathf_target} PROPERTIES FOLDER "Mathf")
+        endif()
+    endforeach()
+
+    # Startup project: the tests are what "does it work?" means here.
+    if(TARGET mathf_tests)
+        set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT mathf_tests)
+    elseif(TARGET mathf_config_report)
+        set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT mathf_config_report)
+    endif()
 endif()
 
 message(STATUS "Mathf ${PROJECT_VERSION}")

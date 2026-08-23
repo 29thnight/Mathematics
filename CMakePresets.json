@@ -5,7 +5,6 @@
     {
       "name": "base",
       "hidden": true,
-      "generator": "Ninja",
       "description": "Builds outside the OneDrive-synced tree: syncing object files mid-build corrupts them (docs/PLAN.md risk table).",
       "binaryDir": "$env{LOCALAPPDATA}/MathfBuild/${presetName}",
       "cacheVariables": {
@@ -13,9 +12,16 @@
       }
     },
     {
+      "name": "ninja",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Single-config command-line builds; each preset pins its own CMAKE_BUILD_TYPE.",
+      "generator": "Ninja"
+    },
+    {
       "name": "msvc-release",
       "displayName": "MSVC x64 Release",
-      "inherits": "base",
+      "inherits": "ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "cl",
@@ -25,7 +31,7 @@
     {
       "name": "msvc-debug",
       "displayName": "MSVC x64 Debug",
-      "inherits": "base",
+      "inherits": "ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "cl",
@@ -35,7 +41,7 @@
     {
       "name": "clang-release",
       "displayName": "clang-cl x64 Release",
-      "inherits": "base",
+      "inherits": "ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang-cl",
@@ -46,20 +52,41 @@
       "name": "scalar-release",
       "displayName": "Scalar fallback (CI coverage)",
       "description": "Same toolchain as msvc-release so the only variable is the backend.",
-      "inherits": "base",
+      "inherits": "ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
         "MATHF_FORCE_SCALAR": "ON"
       }
+    },
+    {
+      "name": "vs2026",
+      "displayName": "Visual Studio 2026 solution (x64)",
+      "description": "Generates Mathf.sln so the whole project can be built, run, and debugged from the IDE. Multi-config: the configuration is picked in Visual Studio, so CMAKE_BUILD_TYPE is deliberately left unset.",
+      "inherits": "base",
+      "generator": "Visual Studio 18 2026",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "toolset": { "value": "host=x64", "strategy": "set" }
     }
   ],
   "buildPresets": [
     { "name": "msvc-release", "configurePreset": "msvc-release" },
     { "name": "msvc-debug", "configurePreset": "msvc-debug" },
     { "name": "clang-release", "configurePreset": "clang-release" },
-    { "name": "scalar-release", "configurePreset": "scalar-release" }
+    { "name": "scalar-release", "configurePreset": "scalar-release" },
+    {
+      "name": "vs2026-release",
+      "displayName": "VS2026 solution - Release",
+      "configurePreset": "vs2026",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2026-debug",
+      "displayName": "VS2026 solution - Debug",
+      "configurePreset": "vs2026",
+      "configuration": "Debug"
+    }
   ],
   "testPresets": [
     {
@@ -80,6 +107,20 @@
     {
       "name": "scalar-release",
       "configurePreset": "scalar-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "vs2026-release",
+      "displayName": "VS2026 solution - Release",
+      "configurePreset": "vs2026",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "vs2026-debug",
+      "displayName": "VS2026 solution - Debug",
+      "configurePreset": "vs2026",
+      "configuration": "Debug",
       "output": { "outputOnFailure": true }
     }
   ]
