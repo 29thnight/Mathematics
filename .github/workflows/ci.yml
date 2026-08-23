@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Windows is the primary matrix: it is the only platform with DirectXMath, so
+  # the parity tests that gate correctness against the baseline run only here.
+  windows:
+    name: ${{ matrix.name }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MSVC Release
+            preset: msvc-release
+          - name: MSVC Debug
+            preset: msvc-debug
+          - name: clang-cl Release
+            preset: clang-release
+          - name: Scalar fallback
+            preset: scalar-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Report detected configuration
+        run: |
+          $bin = "$env:LOCALAPPDATA\MathfBuild\${{ matrix.preset }}\tools\mathf_config_report.exe"
+          & $bin
+        shell: pwsh
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  # Portability guard. No DirectXMath here, so these jobs prove the library
+  # builds and self-checks cleanly outside the Windows toolchain.
+  linux:
+    name: Linux ${{ matrix.cc }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Report detected configuration
+        run: ./build/tools/mathf_config_report
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  # ARM64/NEON coverage. The SSE and NEON backends are separate code paths, so
+  # without this the NEON path would ship untested.
+  linux-arm64:
+    name: Linux ARM64 (NEON)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Report detected configuration
+        run: ./build/tools/mathf_config_report
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

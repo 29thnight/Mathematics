@@ -1,0 +1,33 @@
+# Build outputs (kept out of OneDrive-synced tree; see docs/PLAN.md risk table)
+build/
+out/
+_deps/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.dll
+*.asm
+*.cod
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Benchmark / test artifacts
+bench_results/
+Testing/
+*.log
+
+# OS
+Thumbs.db
+desktop.ini

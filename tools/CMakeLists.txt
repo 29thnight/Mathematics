@@ -1,0 +1,2 @@
+add_executable(mathf_config_report config_report.cpp)
+target_link_libraries(mathf_config_report PRIVATE mathf mathf_build_settings mathf_fp_precise)
