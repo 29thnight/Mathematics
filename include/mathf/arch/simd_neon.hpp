@@ -117,9 +117,11 @@ MulAdd(VecReg a, VecReg b, VecReg c) noexcept {
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 MulSub(VecReg a, VecReg b, VecReg c) noexcept {
     MATHF_IF_CONSTEVAL { return consteval_ops::MulSub(a, b, c); }
-    // vfmsq_f32(x, y, z) is x - y*z, so this is -(c - a*b) == a*b - c, keeping
-    // the fused product rather than rounding it first.
-    return VecReg{vnegq_f32(vfmsq_f32(c.v, a.v, b.v))};
+    // -c + a*b, computed directly. The tempting spelling -(c - a*b) via
+    // vnegq_f32(vfmsq_f32(...)) gives the wrong zero sign when a*b == c exactly:
+    // the subtraction yields +0.0 and the negate then flips it to -0.0, while
+    // every other backend and consteval_ops produce +0.0.
+    return VecReg{vfmaq_f32(vnegq_f32(c.v), a.v, b.v)};
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
@@ -128,13 +130,19 @@ NegMulAdd(VecReg a, VecReg b, VecReg c) noexcept {
     return VecReg{vfmsq_f32(c.v, a.v, b.v)};   // c - a*b
 }
 
-// KNOWN DIVERGENCE: NaN handling differs from the SSE backend and from
-// consteval_ops. ARM's FMIN/FMAX return a quiet NaN when either operand is NaN;
-// SSE's minps/maxps return the second operand. So Min(NaN, x) is NaN here and x
-// on x86. DirectXMath carries the same split and leaves it unspecified; matching
-// them would cost a compare and a select on every call, for a case no caller
-// should be relying on. Tests exclude NaN from Min/Max parity and assert this
-// difference explicitly instead.
+// KNOWN DIVERGENCES from the SSE backend and from consteval_ops, in two
+// distinct cases. DirectXMath carries the same split and leaves both
+// unspecified; matching x86 would cost a compare and a select on every call, for
+// behaviour no caller should be relying on. Tests assert both explicitly per
+// target rather than excluding them.
+//
+//   NaN    ARM FMIN/FMAX return a quiet NaN when either operand is NaN.
+//          minps/maxps return the second operand. So Min(NaN, x) is NaN here
+//          and x on x86.
+//
+//   ±0.0   ARM FMIN/FMAX treat -0.0 as strictly less than +0.0 regardless of
+//          operand order. minps/maxps compare them equal and fall through to
+//          the second operand. So Min(-0.0, +0.0) is -0.0 here and +0.0 on x86.
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Min(VecReg a, VecReg b) noexcept {
     MATHF_IF_CONSTEVAL { return consteval_ops::Min(a, b); }
@@ -158,8 +166,14 @@ MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL RSqrt(VecReg a) noexcep
     return VecReg{vdivq_f32(vdupq_n_f32(1.0f), vsqrtq_f32(a.v))};
 }
 
+// One Newton-Raphson step on top of the estimate. ARM's vrsqrteq_f32 alone is
+// specified to roughly 8 bits, well short of the ~12 that SSE's rsqrtps gives,
+// and the refinement step is what the instruction is designed to be paired with.
+// Still far cheaper than the exact form, and it keeps Est meaning the same thing
+// to callers on both targets.
 MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL RSqrtEst(VecReg a) noexcept {
-    return VecReg{vrsqrteq_f32(a.v)};
+    const float32x4_t e = vrsqrteq_f32(a.v);
+    return VecReg{vmulq_f32(e, vrsqrtsq_f32(vmulq_f32(a.v, e), e))};
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL Recip(VecReg a) noexcept {
@@ -167,8 +181,10 @@ MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL Recip(VecReg a) noexcep
     return VecReg{vdivq_f32(vdupq_n_f32(1.0f), a.v)};
 }
 
+// Refined for the same reason as RSqrtEst above.
 MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL RecipEst(VecReg a) noexcept {
-    return VecReg{vrecpeq_f32(a.v)};
+    const float32x4_t e = vrecpeq_f32(a.v);
+    return VecReg{vmulq_f32(e, vrecpsq_f32(a.v, e))};
 }
 
 // ---------------------------------------------------------------------- bitwise
@@ -294,7 +310,9 @@ Dot4(VecReg a, VecReg b) noexcept {
 template <int X, int Y, int Z, int W>
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL Shuffle(VecReg a) noexcept {
     MATHF_IF_CONSTEVAL { return consteval_ops::Shuffle<X, Y, Z, W>(a); }
-    float32x4_t r = vdupq_n_f32(0.0f);
+    // Seeded from a.v rather than a zero vector: all four lanes are overwritten
+    // below, so materializing a zero first is pure waste.
+    float32x4_t r = a.v;
     r = vsetq_lane_f32(vgetq_lane_f32(a.v, X), r, 0);
     r = vsetq_lane_f32(vgetq_lane_f32(a.v, Y), r, 1);
     r = vsetq_lane_f32(vgetq_lane_f32(a.v, Z), r, 2);
@@ -306,7 +324,9 @@ template <int X, int Y, int Z, int W>
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg MATHF_CALL
 Shuffle(VecReg a, VecReg b) noexcept {
     MATHF_IF_CONSTEVAL { return consteval_ops::Shuffle<X, Y, Z, W>(a, b); }
-    float32x4_t r = vdupq_n_f32(0.0f);
+    // Seeded from a.v rather than a zero vector: all four lanes are overwritten
+    // below, so materializing a zero first is pure waste.
+    float32x4_t r = a.v;
     r = vsetq_lane_f32(vgetq_lane_f32(a.v, X), r, 0);
     r = vsetq_lane_f32(vgetq_lane_f32(a.v, Y), r, 1);
     r = vsetq_lane_f32(vgetq_lane_f32(b.v, Z), r, 2);

@@ -75,3 +75,25 @@ function(mathf_fetch_glm)
     FetchContent_MakeAvailable(glm)
     mathf_group_third_party(glm)
 endfunction()
+
+# ------------------------------------------------------------- Sony Vectormath
+# Sony's original release is unmaintained; this is the modernised fork in common
+# use. Header-only with no build system of its own, so the target is declared
+# here. Secondary comparison target, like GLM: a failed fetch skips its
+# benchmarks rather than breaking the build.
+function(mathf_fetch_vectormath)
+    # Pinned to a commit rather than a branch: this fork publishes no tags, and
+    # a moving branch would silently change what the benchmarks measure.
+    FetchContent_Declare(vectormath
+        GIT_REPOSITORY https://github.com/glampert/vectormath.git
+        GIT_TAG        7105ef341303fe83b3dacd6883d9333989126069)
+    FetchContent_MakeAvailable(vectormath)
+
+    if(NOT TARGET vectormath::vectormath)
+        add_library(vectormath_headers INTERFACE)
+        add_library(vectormath::vectormath ALIAS vectormath_headers)
+        # SYSTEM so the library's own warnings do not fail our strict build.
+        target_include_directories(vectormath_headers SYSTEM INTERFACE
+            "${vectormath_SOURCE_DIR}")
+    endif()
+endfunction()

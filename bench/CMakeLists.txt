@@ -12,8 +12,10 @@ else()
                     "will be missing from benchmark results.")
 endif()
 
-# GLM is a secondary reference. Fetching it is best-effort so an offline build
-# still produces the DirectXMath comparison that actually gates releases.
+# GLM and Sony Vectormath are secondary references -- context for where Mathf
+# and DirectXMath sit, not part of the release gate. Fetching them is
+# best-effort so an offline build still produces the DirectXMath comparison that
+# does gate releases.
 option(MATHF_BENCH_GLM "Include GLM in benchmark comparisons" ON)
 if(MATHF_BENCH_GLM)
     mathf_fetch_glm()
@@ -25,5 +27,16 @@ if(MATHF_BENCH_GLM)
             GLM_FORCE_ALIGNED_GENTYPES)
     else()
         message(STATUS "GLM unavailable; skipping its benchmarks.")
+    endif()
+endif()
+
+option(MATHF_BENCH_VECTORMATH "Include Sony Vectormath in benchmark comparisons" ON)
+if(MATHF_BENCH_VECTORMATH)
+    mathf_fetch_vectormath()
+    if(TARGET vectormath::vectormath)
+        target_link_libraries(mathf_bench PRIVATE vectormath::vectormath)
+        target_compile_definitions(mathf_bench PRIVATE MATHF_BENCH_HAS_VECTORMATH=1)
+    else()
+        message(STATUS "Sony Vectormath unavailable; skipping its benchmarks.")
     endif()
 endif()

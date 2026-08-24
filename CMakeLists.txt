@@ -34,6 +34,10 @@ option(MATHF_BUILD_TESTS  "Build Mathf tests"      ${MATHF_IS_TOP_LEVEL})
 option(MATHF_BUILD_BENCH  "Build Mathf benchmarks" ${MATHF_IS_TOP_LEVEL})
 option(MATHF_BUILD_TOOLS  "Build Mathf tools"      ${MATHF_IS_TOP_LEVEL})
 option(MATHF_FORCE_SCALAR "Force the scalar SIMD fallback (for CI coverage)" OFF)
+# Without this every build enables AVX2, so the SSE2 paths -- the dpps-free dot
+# products, the blendv-free Select, the non-FMA multiply-add -- are never
+# compiled and never tested.
+option(MATHF_BASELINE_SSE2 "Build against SSE2 only, without AVX2 or SSE4.1" OFF)
 
 # Group targets into folders in IDEs that have them (Visual Studio, Xcode).
 # Ignored by every other generator.
@@ -72,7 +76,8 @@ if(MSVC)
     # Must be gated on the target architecture, not just on MATHF_FORCE_SCALAR:
     # /arch:AVX2 is an x86/x64-only option and cl.exe rejects it outright when
     # targeting ARM64, breaking the build before any NEON code is reached.
-    if(NOT MATHF_FORCE_SCALAR AND MATHF_TARGET_IS_X86)
+    # x64 has SSE2 unconditionally, so the baseline build simply omits /arch.
+    if(NOT MATHF_FORCE_SCALAR AND NOT MATHF_BASELINE_SSE2 AND MATHF_TARGET_IS_X86)
         target_compile_options(mathf_build_settings INTERFACE /arch:AVX2)
     endif()
     target_compile_options(mathf_build_settings INTERFACE
@@ -80,8 +85,10 @@ if(MSVC)
 else()
     target_compile_options(mathf_build_settings INTERFACE
         -Wall -Wextra -Wpedantic)
-    if(NOT MATHF_FORCE_SCALAR AND MATHF_TARGET_IS_X86)
+    if(NOT MATHF_FORCE_SCALAR AND NOT MATHF_BASELINE_SSE2 AND MATHF_TARGET_IS_X86)
         target_compile_options(mathf_build_settings INTERFACE -mavx2 -mfma)
+    elseif(MATHF_BASELINE_SSE2 AND MATHF_TARGET_IS_X86)
+        target_compile_options(mathf_build_settings INTERFACE -msse2 -mno-sse4.1)
     endif()
     target_compile_options(mathf_build_settings INTERFACE
         $<$<CONFIG:Release,RelWithDebInfo>:-O2>)

@@ -63,6 +63,13 @@ inline ::testing::AssertionResult NearEqual(VecReg actual, VecReg expected,
     const auto e = ToArray(expected);
     for (int i = 0; i < 4; ++i) {
         if (std::isnan(a[i]) && std::isnan(e[i])) continue;
+        // Infinities have to match exactly, sign included: subtracting them
+        // yields NaN, which would make the tolerance check below pass anything.
+        if (std::isinf(a[i]) || std::isinf(e[i])) {
+            if (a[i] == e[i]) continue;
+            return ::testing::AssertionFailure()
+                   << "lane " << i << ": actual " << a[i] << ", expected " << e[i];
+        }
         const float tol = std::max(absTol, std::abs(e[i]) * relTol);
         if (!(std::abs(a[i] - e[i]) <= tol)) {
             return ::testing::AssertionFailure()

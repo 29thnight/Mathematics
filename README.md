@@ -23,14 +23,16 @@ static_assert(mathf::GetX(mathf::Dot4(mathf::Set(1, 2, 3, 4),
                                       mathf::Set(1, 1, 1, 1))) == 10.0f);
 ```
 
-| | Mathf | DirectXMath |
-|---|---|---|
-| MulAdd 지연 | 2.14 ns | 2.14 ns |
-| Dot4 지연 | 4.25 ns | 4.25 ns |
-| constexpr 전체 지원 | O | X |
-| 플랫폼 | Windows / Linux / ARM64 | Windows 중심 |
+| | Mathf | DirectXMath | GLM | Vectormath |
+|---|---|---|---|---|
+| MulAdd 지연 | 2.25 ns | 2.25 ns | 2.25 ns | 2.31 ns |
+| Dot4 지연 | 4.42 ns | 4.40 ns | — | — |
+| MulAdd 처리량 | 976 M/s | 968 M/s | 586 M/s | 982 M/s |
+| constexpr 전체 지원 | O | X | 부분 | X |
+| 플랫폼 | Windows / Linux / ARM64 | Windows 중심 | 전 플랫폼 | 전 플랫폼 |
 
-측정 조건과 주의사항은 [docs/BASELINE.md](docs/BASELINE.md)에 있다.
+측정 조건과 주의사항은 [docs/BASELINE.md](docs/BASELINE.md)에 있다 — 특히 MSVC에서
+**C++20으로 빌드하면 약 2배 느려진다** (`if consteval` 부재).
 
 ## 요구 사항
 

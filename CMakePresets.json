@@ -61,6 +61,18 @@
       }
     },
     {
+      "name": "sse2-release",
+      "displayName": "SSE2 baseline (no AVX2 or SSE4.1)",
+      "description": "Compiles the fallback paths that every other preset optimizes away: dot products without dpps, Select without blendv, multiply-add without FMA.",
+      "inherits": "ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "MATHF_BASELINE_SSE2": "ON"
+      }
+    },
+    {
       "name": "vs2026",
       "displayName": "Visual Studio 2026 solution (x64)",
       "description": "Generates Mathf.sln so the whole project can be built, run, and debugged from the IDE. Multi-config: the configuration is picked in Visual Studio, so CMAKE_BUILD_TYPE is deliberately left unset.",
@@ -75,6 +87,7 @@
     { "name": "msvc-debug", "configurePreset": "msvc-debug" },
     { "name": "clang-release", "configurePreset": "clang-release" },
     { "name": "scalar-release", "configurePreset": "scalar-release" },
+    { "name": "sse2-release", "configurePreset": "sse2-release" },
     {
       "name": "vs2026-release",
       "displayName": "VS2026 solution - Release",
@@ -107,6 +120,11 @@
     {
       "name": "scalar-release",
       "configurePreset": "scalar-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "sse2-release",
+      "configurePreset": "sse2-release",
       "output": { "outputOnFailure": true }
     },
     {

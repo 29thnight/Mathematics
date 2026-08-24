@@ -137,15 +137,27 @@ TEST(BackendArithmetic, MatchesReferenceOnEdgeValues) {
             EXPECT_TRUE(BitsEqual(mathf::Add(a, b), ref::Add(a, b))) << where;
             EXPECT_TRUE(BitsEqual(mathf::Sub(a, b), ref::Sub(a, b))) << where;
             EXPECT_TRUE(BitsEqual(mathf::Mul(a, b), ref::Mul(a, b))) << where;
+            EXPECT_TRUE(BitsEqual(mathf::Div(a, b), ref::Div(a, b))) << where;
             EXPECT_TRUE(BitsEqual(mathf::Negate(a), ref::Negate(a))) << where;
             EXPECT_TRUE(BitsEqual(mathf::Abs(a), ref::Abs(a))) << where;
+            EXPECT_TRUE(BitsEqual(mathf::Recip(a), ref::Recip(a))) << where;
+
+            // Sqrt is the one operation whose reference is not bit-exact: the
+            // hardware instruction is correctly rounded, while consteval_ops
+            // iterates Newton-Raphson in double and rounds once more at the end,
+            // which can land a ULP away.
+            EXPECT_TRUE(NearEqual(mathf::Sqrt(a), ref::Sqrt(a))) << where;
+
+            // Min/Max diverge by target on NaN and on signed-zero ties, so they
+            // are pinned separately below rather than compared here. Every other
+            // edge combination must agree exactly.
         }
     }
 }
 
-// Min/Max NaN behaviour is target-specific and intentionally not normalised
-// (see arch/simd_neon.hpp). This pins down what the current target actually
-// does, so a change is a visible test update rather than a silent shift.
+// Min/Max are target-specific in two places and intentionally not normalised
+// (see arch/simd_neon.hpp). These tests pin what the current target actually
+// does, so a change shows up as a visible test update rather than a silent shift.
 TEST(BackendArithmetic, MinMaxNaNBehaviourIsDocumented) {
     const VecReg nan = mathf::Splat(Opaque(QuietNaN()));
     const VecReg one = mathf::Splat(Opaque(1.0f));
@@ -164,6 +176,47 @@ TEST(BackendArithmetic, MinMaxNaNBehaviourIsDocumented) {
     EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Max(nan, one))));
     EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Max(one, nan))));
 #endif
+}
+
+// The second divergence. -0.0 and +0.0 compare equal, so a value comparison
+// cannot see this at all -- it has to be checked on the bits.
+TEST(BackendArithmetic, MinMaxSignedZeroBehaviourIsDocumented) {
+    const VecReg pos = mathf::Splat(Opaque(0.0f));
+    const VecReg neg = mathf::Splat(Opaque(-0.0f));
+    constexpr std::uint32_t kPosZero = 0x00000000u;
+    constexpr std::uint32_t kNegZero = 0x80000000u;
+
+#if MATHF_SIMD_SSE || MATHF_SIMD_SCALAR
+    // minps compares them equal and falls through to the second operand, so the
+    // result is whichever zero was passed second.
+    EXPECT_EQ(mathf::LaneBits(mathf::Min(neg, pos), 0), kPosZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Min(pos, neg), 0), kNegZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Max(neg, pos), 0), kPosZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Max(pos, neg), 0), kNegZero);
+#elif MATHF_SIMD_NEON
+    // ARM FMIN/FMAX order the zeros, independent of which came first.
+    EXPECT_EQ(mathf::LaneBits(mathf::Min(neg, pos), 0), kNegZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Min(pos, neg), 0), kNegZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Max(neg, pos), 0), kPosZero);
+    EXPECT_EQ(mathf::LaneBits(mathf::Max(pos, neg), 0), kPosZero);
+#endif
+}
+
+// MulSub is where a fused implementation can lose the sign of zero: computing
+// -(c - a*b) instead of a*b - c flips it when the two cancel exactly.
+TEST(BackendArithmetic, FusedFormsKeepZeroSignOnExactCancellation) {
+    const VecReg two = mathf::Splat(Opaque(2.0f));
+    const VecReg three = mathf::Splat(Opaque(3.0f));
+    const VecReg six = mathf::Splat(Opaque(6.0f));
+
+    EXPECT_EQ(mathf::LaneBits(mathf::MulSub(two, three, six), 0), 0x00000000u)
+        << "2*3 - 6 must be +0.0";
+    EXPECT_EQ(mathf::LaneBits(mathf::NegMulAdd(two, three, six), 0), 0x00000000u)
+        << "6 - 2*3 must be +0.0";
+    EXPECT_TRUE(BitsEqual(mathf::MulSub(two, three, six),
+                          ref::MulSub(two, three, six)));
+    EXPECT_TRUE(BitsEqual(mathf::NegMulAdd(two, three, six),
+                          ref::NegMulAdd(two, three, six)));
 }
 
 TEST(BackendArithmetic, SqrtOfNegativeIsNaN) {
