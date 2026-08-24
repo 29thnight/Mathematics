@@ -29,6 +29,13 @@ namespace detail {
 template <typename vector_type>
 concept vector_like = requires(const vector_type& v, vec_reg r) {
     { vector_type::lane_count } -> std::convertible_to<int>;
+    requires vector_type::lane_count >= 2 && vector_type::lane_count <= 4;
+    requires std::default_initializable<vector_type>;
+    requires std::constructible_from<vector_type, float>;
+    { v.x } -> std::same_as<const float&>;
+    { v.y } -> std::same_as<const float&>;
+    requires (vector_type::lane_count < 3 || requires { v.z; });
+    requires (vector_type::lane_count < 4 || requires { v.w; });
     { v.reg() } -> std::same_as<vec_reg>;
     { vector_type::from_reg(r) } -> std::same_as<vector_type>;
 };

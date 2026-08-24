@@ -9,10 +9,13 @@
 // Release gate (docs/PLAN.md §4.2): Mathematics must be within +-5% of DirectXMath on
 // every mapped operation. Run with --benchmark_repetitions=5 for stable numbers.
 
+#include <mathematics/geometry.hpp>
 #include <mathematics/matrix.hpp>
+#include <mathematics/ranges.hpp>
 #include <mathematics/transform.hpp>
 #include <mathematics/vec_reg.hpp>
 #include <mathematics/vector.hpp>
+#include <mathematics/views.hpp>
 
 #include <benchmark/benchmark.h>
 
@@ -20,7 +23,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <random>
+#include <ranges>
+#include <span>
 #include <vector>
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
@@ -322,7 +328,13 @@ BENCHMARK(bm_dx_math_dot4_latency);
 // This family instead measures what callers actually write -- compute a dot and
 // use the scalar -- with the identical shape everywhere: broadcast a float,
 // dot it, read one lane back. b sums to 1 so the accumulator holds at 1.0.
-constexpr float dot_stable_lane = 0.25f;
+//
+// Keep the value runtime-visible. With a constexpr 0.25f, clang proves that
+// GLM's and Vectormath's scalar expressions are exactly `acc = acc` and removes
+// the dot product, producing an impossible sub-nanosecond result. A volatile
+// read outside the timed loop preserves the stable runtime value without
+// exposing the identity to the optimizer.
+const volatile float dot_stable_lane = 0.25f;
 
 static void bm_mathematics_dot4_scalar_latency(benchmark::State& state) {
     float acc = 1.0f;
@@ -731,6 +743,60 @@ static void bm_mathematics_matrix4x4_inverse(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * matrix_batch_size);
 }
 BENCHMARK(bm_mathematics_matrix4x4_inverse);
+
+// Same arithmetic as inverse(), but failure is represented in the type rather
+// than by an identity sentinel. This measures the optional construction and
+// success check on the overwhelmingly common invertible path.
+static void bm_cxx20_matrix4x4_try_inverse_optional(benchmark::State& state) {
+    auto& arena_instance = get_inverse_arena();
+    const auto* in = reinterpret_cast<const math::matrix4x4*>(arena_instance.in);
+    auto* out = reinterpret_cast<math::matrix4x4*>(arena_instance.out);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < matrix_batch_size; ++i) {
+            const auto value = math::try_inverse(in[i]);
+            if (value) out[i] = *value;
+        }
+        benchmark::DoNotOptimize(out);
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * matrix_batch_size);
+}
+BENCHMARK(bm_cxx20_matrix4x4_try_inverse_optional);
+
+static void bm_cxx20_decompose_out_parameters(benchmark::State& state) {
+    const auto& in = matrix_data();
+    std::vector<math::decomposed_transform> out(matrix_batch_size);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < matrix_batch_size; ++i) {
+            auto& value = out[static_cast<size_t>(i)];
+            bool ok = math::decompose(in[static_cast<size_t>(i)], value.scale,
+                                      value.rotation, value.translation);
+            benchmark::DoNotOptimize(ok);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * matrix_batch_size);
+}
+BENCHMARK(bm_cxx20_decompose_out_parameters);
+
+static void bm_cxx20_decompose_optional(benchmark::State& state) {
+    const auto& in = matrix_data();
+    std::vector<math::decomposed_transform> out(matrix_batch_size);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < matrix_batch_size; ++i) {
+            const auto value = math::decompose(in[static_cast<size_t>(i)]);
+            if (value) out[static_cast<size_t>(i)] = *value;
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * matrix_batch_size);
+}
+BENCHMARK(bm_cxx20_decompose_optional);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_matrix4x4_inverse(benchmark::State& state) {
@@ -1295,7 +1361,141 @@ const std::vector<math::vector3>& stream_data() {
     }();
     return data;
 }
+
+const std::vector<math::ray>& ray_data() {
+    static const std::vector<math::ray> rays = [] {
+        std::vector<math::ray> out(stream_count);
+        const auto& points = stream_data();
+        for (int i = 0; i < stream_count; ++i) {
+            const math::vector3 origin =
+                points[static_cast<size_t>(i)] * 2.0f + math::vector3{0, 0, -30};
+            out[static_cast<size_t>(i)] =
+                math::ray{origin, math::normalize(-origin)};
+        }
+        return out;
+    }();
+    return rays;
+}
 } // namespace
+
+// ========================================= C++20 API cost and safety tradeoffs
+// Pointer/count and span deliberately keep independent loops so a standard
+// library change cannot silently alter the established engine hot path.
+static void bm_cxx20_aabb_from_points_pointer(benchmark::State& state) {
+    const auto& points = stream_data();
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        math::aabb box = math::aabb_from_points(points.data(), stream_count);
+        benchmark::DoNotOptimize(box);
+    }
+    state.SetItemsProcessed(state.iterations() * stream_count);
+}
+BENCHMARK(bm_cxx20_aabb_from_points_pointer);
+
+static void bm_cxx20_aabb_from_points_span(benchmark::State& state) {
+    const auto& points = stream_data();
+    const std::span<const math::vector3> view{points};
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        math::aabb box = math::aabb_from_points(view);
+        benchmark::DoNotOptimize(box);
+    }
+    state.SetItemsProcessed(state.iterations() * stream_count);
+}
+BENCHMARK(bm_cxx20_aabb_from_points_span);
+
+static void bm_cxx20_aabb_from_points_range(benchmark::State& state) {
+    const auto& points = stream_data();
+    auto view = std::span<const math::vector3>{points} |
+                std::views::transform([](const math::vector3& point) {
+                    return point;
+                });
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        math::aabb box = math::aabb_from_points(view);
+        benchmark::DoNotOptimize(box);
+    }
+    state.SetItemsProcessed(state.iterations() * stream_count);
+}
+BENCHMARK(bm_cxx20_aabb_from_points_range);
+
+static math::aabb legacy_aabb_from_min_max(const math::vector3& minimum,
+                                           const math::vector3& maximum) noexcept {
+    return math::aabb{(minimum + maximum) * 0.5f,
+                      (maximum - minimum) * 0.5f};
+}
+
+static void bm_cxx20_aabb_legacy_arithmetic(benchmark::State& state) {
+    const auto& points = stream_data();
+    std::vector<math::aabb> out(stream_count / 2);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < stream_count / 2; ++i) {
+            const auto& a = points[static_cast<size_t>(i)];
+            const auto& b = points[static_cast<size_t>(i + stream_count / 2)];
+            out[static_cast<size_t>(i)] =
+                legacy_aabb_from_min_max(math::min(a, b), math::max(a, b));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (stream_count / 2));
+}
+BENCHMARK(bm_cxx20_aabb_legacy_arithmetic);
+
+static void bm_cxx20_aabb_midpoint(benchmark::State& state) {
+    const auto& points = stream_data();
+    std::vector<math::aabb> out(stream_count / 2);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < stream_count / 2; ++i) {
+            const auto& a = points[static_cast<size_t>(i)];
+            const auto& b = points[static_cast<size_t>(i + stream_count / 2)];
+            out[static_cast<size_t>(i)] =
+                math::aabb::from_min_max(math::min(a, b), math::max(a, b));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (stream_count / 2));
+}
+BENCHMARK(bm_cxx20_aabb_midpoint);
+
+static void bm_cxx20_raycast_out_parameter(benchmark::State& state) {
+    const auto& rays = ray_data();
+    const math::sphere target{math::vector3{}, 5.0f};
+    std::vector<float> out(stream_count);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < stream_count; ++i) {
+            float distance = -1.0f;
+            const bool hit = math::raycast(rays[static_cast<size_t>(i)], target,
+                                           distance);
+            out[static_cast<size_t>(i)] = hit ? distance : -1.0f;
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * stream_count);
+}
+BENCHMARK(bm_cxx20_raycast_out_parameter);
+
+static void bm_cxx20_raycast_optional(benchmark::State& state) {
+    const auto& rays = ray_data();
+    const math::sphere target{math::vector3{}, 5.0f};
+    std::vector<float> out(stream_count);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < stream_count; ++i) {
+            out[static_cast<size_t>(i)] =
+                math::raycast(rays[static_cast<size_t>(i)], target).value_or(-1.0f);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * stream_count);
+}
+BENCHMARK(bm_cxx20_raycast_optional);
 
 // cross with a unit axis has a four-state fixed cycle: X -> -Y -> -X -> Y.
 // The old benchmark normalized after every cross, so it measured two APIs and
@@ -1471,5 +1671,280 @@ static void bm_dx_math_transform_coord_stream(benchmark::State& state) {
 }
 BENCHMARK(bm_dx_math_transform_coord_stream);
 #endif
+
+// =========================================== fixed-extent range terminal cost
+// Tiny-range timings complement spike/codegen_library.cpp. DoNotOptimize keeps
+// each input and result observable without adding work inside the operation.
+static void bm_fixed_ranges_components_direct_sum(benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result = value.x + value.y + value.z + value.w;
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_direct_sum);
+
+static void bm_fixed_ranges_components_view_sum(benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        float result = 0.0f;
+        for (const float component : math::components(value)) result += component;
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_view_sum);
+
+static void bm_fixed_ranges_components_fold(benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result = math::ranges::fold_fixed(
+            math::components(value), 0.0f, std::plus<>{});
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_fold);
+
+static void bm_fixed_ranges_components_pipeline_fold(benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result =
+            math::components(value) |
+            math::views::transform_fixed(
+                [](float component) { return component; }) |
+            math::ranges::fold_fixed(0.0f, std::plus<>{});
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_pipeline_fold);
+
+static void bm_fixed_ranges_components_direct_square_sum(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result = value.x * value.x + value.y * value.y +
+                             value.z * value.z + value.w * value.w;
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_direct_square_sum);
+
+static void bm_fixed_ranges_components_pipeline_square_sum(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result =
+            math::components(value) |
+            math::views::transform_fixed(
+                [](float component) { return component * component; }) |
+            math::ranges::fold_fixed(0.0f, std::plus<>{});
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_pipeline_square_sum);
+
+static void bm_fixed_ranges_components_lazy_square_range_for(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        float result = 0.0f;
+        for (const float component :
+             math::components(value) |
+                 math::views::transform_fixed([](float element) {
+                     return element * element;
+                 })) {
+            result += component;
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_lazy_square_range_for);
+
+static void bm_fixed_ranges_components_lazy_range_for(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        float result = 0.0f;
+        for (const float component :
+             math::components(value) |
+                 math::views::transform_fixed(
+                     [](float element) { return element; })) {
+            result += component;
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_lazy_range_for);
+
+static void bm_fixed_ranges_components_direct_for_each(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    for (auto _ : state) {
+        value.x = value.x * 0.5f + 0.5f;
+        value.y = value.y * 0.5f + 0.5f;
+        value.z = value.z * 0.5f + 0.5f;
+        value.w = value.w * 0.5f + 0.5f;
+        benchmark::DoNotOptimize(value);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_direct_for_each);
+
+static void bm_fixed_ranges_components_view_for_each(benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    for (auto _ : state) {
+        for (float& component : math::components(value)) {
+            component = component * 0.5f + 0.5f;
+        }
+        benchmark::DoNotOptimize(value);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_view_for_each);
+
+static void bm_fixed_ranges_components_fixed_for_each(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    for (auto _ : state) {
+        static_cast<void>(math::ranges::for_each_fixed(
+            math::components(value), [](float& component) {
+                component = component * 0.5f + 0.5f;
+            }));
+        benchmark::DoNotOptimize(value);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_fixed_for_each);
+
+static void bm_fixed_ranges_components_pipeline_for_each(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    for (auto _ : state) {
+        static_cast<void>(
+            math::components(value) |
+            math::ranges::for_each_fixed([](float& component) {
+                component = component * 0.5f + 0.5f;
+            }));
+        benchmark::DoNotOptimize(value);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_pipeline_for_each);
+
+static void bm_fixed_ranges_components_direct_transform(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    std::array<float, 4> output{};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        output[0] = value.x * 2.0f + 1.0f;
+        output[1] = value.y * 2.0f + 1.0f;
+        output[2] = value.z * 2.0f + 1.0f;
+        output[3] = value.w * 2.0f + 1.0f;
+        benchmark::DoNotOptimize(output);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_direct_transform);
+
+static void bm_fixed_ranges_components_view_transform(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    std::array<float, 4> output{};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        auto destination = output.begin();
+        for (const float component : math::components(value)) {
+            *destination++ = component * 2.0f + 1.0f;
+        }
+        benchmark::DoNotOptimize(output);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_view_transform);
+
+static void bm_fixed_ranges_components_fixed_transform(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    std::array<float, 4> output{};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        static_cast<void>(math::ranges::transform_fixed(
+            math::components(value), output.begin(),
+            [](float component) { return component * 2.0f + 1.0f; }));
+        benchmark::DoNotOptimize(output);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_fixed_transform);
+
+static void bm_fixed_ranges_components_pipeline_transform(
+    benchmark::State& state) {
+    math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
+    std::array<float, 4> output{};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        static_cast<void>(
+            math::components(value) |
+            math::ranges::transform_fixed_to(
+                output.begin(), [](float component) {
+                    return component * 2.0f + 1.0f;
+                }));
+        benchmark::DoNotOptimize(output);
+    }
+}
+BENCHMARK(bm_fixed_ranges_components_pipeline_transform);
+
+static void bm_fixed_ranges_rows_direct_sum(benchmark::State& state) {
+    math::matrix4x4 value{1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 14, 15, 16};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        float result = 0.0f;
+        for (std::size_t row = 0; row < 4; ++row) {
+            for (std::size_t column = 0; column < 4; ++column) {
+                result += value.m[row][column];
+            }
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_rows_direct_sum);
+
+static void bm_fixed_ranges_rows_view_sum(benchmark::State& state) {
+    math::matrix4x4 value{1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 14, 15, 16};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        float result = 0.0f;
+        for (const auto row : math::rows(value)) {
+            for (const float element : row) result += element;
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_rows_view_sum);
+
+static void bm_fixed_ranges_rows_fold(benchmark::State& state) {
+    math::matrix4x4 value{1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 14, 15, 16};
+    benchmark::DoNotOptimize(value);
+    for (auto _ : state) {
+        const float result = math::ranges::fold_fixed(
+            math::rows(value), 0.0f,
+            [](float accumulated, std::span<const float, 4> row) {
+                return math::ranges::fold_fixed(
+                    row, accumulated, std::plus<>{});
+            });
+        benchmark::DoNotOptimize(result);
+    }
+}
+BENCHMARK(bm_fixed_ranges_rows_fold);
 
 BENCHMARK_MAIN();

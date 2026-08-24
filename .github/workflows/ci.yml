@@ -22,6 +22,8 @@ jobs:
         include:
           - name: MSVC Release
             preset: msvc-release
+          - name: MSVC C++20 Release
+            preset: msvc-cpp20-release
           - name: MSVC Debug
             preset: msvc-debug
           - name: clang-cl Release

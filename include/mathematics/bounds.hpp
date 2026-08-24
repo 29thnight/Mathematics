@@ -16,7 +16,27 @@
 
 #include <mathematics/vector.hpp>
 
+#include <concepts>
+#include <numeric>
+#include <ranges>
+#include <span>
+
 namespace math {
+
+namespace detail {
+
+// Preserve the old single-add fast path for ordinary coordinates, but fall
+// back to C++20's overflow-safe midpoint when that addition is non-finite.
+// `sum - sum == 0` is true for every finite sum and false for infinity/NaN.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr float
+overflow_safe_midpoint(float a, float b) noexcept {
+    MATHEMATICS_IF_CONSTEVAL { return std::midpoint(a, b); }
+    const float sum = a + b;
+    if (sum - sum == 0.0f) return sum * 0.5f;
+    return std::midpoint(a, b);
+}
+
+} // namespace detail
 
 // How one volume sits relative to another. Note what Contains does NOT mean:
 // `a.Contains(b)` says b is entirely inside a. A huge sphere that swallows a
@@ -85,7 +105,17 @@ struct aabb {
 
     MATHEMATICS_NODISCARD static constexpr aabb
     from_min_max(const vector3& minimum, const vector3& maximum) noexcept {
-        return aabb{(minimum + maximum) * 0.5f, (maximum - minimum) * 0.5f};
+        // std::midpoint avoids overflowing the addition when both endpoints are
+        // large and have the same sign. Measuring the extent from that centre
+        // also handles the full [-FLT_MAX, +FLT_MAX] interval without first
+        // forming the unrepresentable difference 2 * FLT_MAX.
+        const vector3 midpoint{
+            detail::overflow_safe_midpoint(minimum.x, maximum.x),
+            detail::overflow_safe_midpoint(minimum.y, maximum.y),
+            detail::overflow_safe_midpoint(minimum.z, maximum.z)};
+        const vector3 lower_extent = midpoint - minimum;
+        const vector3 upper_extent = maximum - midpoint;
+        return aabb{midpoint, math::max(lower_extent, upper_extent)};
     }
 };
 
@@ -119,7 +149,23 @@ expand(const aabb& box, float margin) noexcept {
 
 // The tightest box around a run of points. An empty range gives an empty box at
 // the origin, which Merge then treats as the identity.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE aabb
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr aabb
+aabb_from_points(std::span<const vector3> points) noexcept {
+    if (points.empty()) return aabb{};
+
+    vector3 minimum = points.front();
+    vector3 maximum = points.front();
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        minimum = min(minimum, points[i]);
+        maximum = max(maximum, points[i]);
+    }
+    return aabb::from_min_max(minimum, maximum);
+}
+
+// Keep the original pointer/count path as a direct indexed loop. It is a common
+// engine hot path, and delegating it through a generic range abstraction would
+// tie its code generation to standard-library implementation details.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr aabb
 aabb_from_points(const vector3* points, int count) noexcept {
     if (points == nullptr || count <= 0) return aabb{};
 
@@ -128,6 +174,27 @@ aabb_from_points(const vector3* points, int count) noexcept {
     for (int i = 1; i < count; ++i) {
         minimum = min(minimum, points[i]);
         maximum = max(maximum, points[i]);
+    }
+    return aabb::from_min_max(minimum, maximum);
+}
+
+// Generic single-pass ranges do not require contiguous storage. The explicit
+// span and pointer/count overloads above remain available so their code
+// generation can be measured and kept stable independently.
+template <std::ranges::input_range point_range>
+    requires std::convertible_to<std::ranges::range_reference_t<point_range>, vector3>
+MATHEMATICS_NODISCARD constexpr aabb
+aabb_from_points(point_range&& points) {
+    auto iterator = std::ranges::begin(points);
+    const auto sentinel = std::ranges::end(points);
+    if (iterator == sentinel) return aabb{};
+
+    vector3 minimum = static_cast<vector3>(*iterator);
+    vector3 maximum = minimum;
+    for (++iterator; iterator != sentinel; ++iterator) {
+        const vector3 point = static_cast<vector3>(*iterator);
+        minimum = min(minimum, point);
+        maximum = max(maximum, point);
     }
     return aabb::from_min_max(minimum, maximum);
 }
@@ -141,7 +208,8 @@ merge(const sphere& input_sphere, const vector3& point) noexcept {
     const float distance = length(offset);
     if (distance <= input_sphere.radius) return input_sphere;
 
-    const float new_radius = (input_sphere.radius + distance) * 0.5f;
+    const float new_radius =
+        detail::overflow_safe_midpoint(input_sphere.radius, distance);
     const float t = (new_radius - input_sphere.radius) / distance;
     return sphere{input_sphere.center + offset * t, new_radius};
 }

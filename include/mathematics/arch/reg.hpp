@@ -13,6 +13,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <limits>
 
 #if MATHEMATICS_SIMD_SSE
 #  include <immintrin.h>
@@ -21,6 +22,14 @@
 #endif
 
 namespace math {
+
+// The bit-level implementation below is intentionally binary32-specific. Fail
+// at the include site on an exotic target instead of silently interpreting a
+// different floating-point representation as IEEE-754 sign/exponent bits.
+static_assert(sizeof(float) == sizeof(std::uint32_t));
+static_assert(std::numeric_limits<float>::is_iec559);
+static_assert(std::numeric_limits<float>::radix == 2);
+static_assert(std::numeric_limits<float>::digits == 24);
 
 // ---------------------------------------------------------------- register type
 #if MATHEMATICS_SIMD_SSE

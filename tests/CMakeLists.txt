@@ -10,7 +10,10 @@ add_executable(mathematics_tests
     backend_shuffle_test.cpp
     vector_test.cpp
     vector_geometry_test.cpp
+    views_test.cpp
+    ranges_test.cpp
     matrix_test.cpp
+    mdspan_test.cpp
     scalar_test.cpp
     quaternion_test.cpp
     transform_test.cpp

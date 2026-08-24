@@ -137,6 +137,22 @@ TEST(transform_decompose, round_trips_what_compose_built) {
     }
 }
 
+TEST(transform_decompose, optional_overload_owns_its_success_value) {
+    const matrix4x4 source = math::compose(
+        vector3{2, 3, 4},
+        math::quaternion_from_axis_angle(vector3{1, 2, 3}, 0.7f),
+        vector3{5, 6, 7});
+
+    const auto parts = math::decompose(source);
+    ASSERT_TRUE(parts.has_value());
+    EXPECT_TRUE(math::near_equal(
+        math::compose(parts->scale, parts->rotation, parts->translation),
+        source, 1e-4f));
+
+    EXPECT_FALSE(math::decompose(math::scaling_matrix(vector3{1, 0, 1}))
+                     .has_value());
+}
+
 // A rotation matrix has determinant +1, so a mirror cannot be one. The
 // convention is to fold the reflection into a negative X scale; what must hold
 // is that recomposing reproduces the original matrix.
@@ -460,6 +476,11 @@ constexpr float compile_time_decompose() {
 }
 } // namespace
 static_assert(compile_time_decompose() == 10.0f);
+constexpr auto compile_time_optional_decompose = math::decompose(
+    math::compose(vector3{2, 3, 4}, quaternion::identity(), vector3{5, 6, 7}));
+static_assert(compile_time_optional_decompose.has_value());
+static_assert(compile_time_optional_decompose->scale.y == 3.0f);
+static_assert(compile_time_optional_decompose->translation.z == 7.0f);
 
 // In ULP, for the reason given on the quaternion version: Clang may fuse a
 // multiply-add at run time that constant evaluation computed unfused.

@@ -23,13 +23,15 @@ clang-cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /c "%source_dir%codege
 if exist codegen_clang.asm ( echo   [ OK ] codegen_clang.asm ) else ( echo   [FAIL] see codegen_clang.log )
 
 REM The prototypes above are historical; this one checks the shipping headers.
+REM Use the normal shipping standard so the optional C++23 mdspan probes are
+REM included alongside the C++20 range probes.
 echo === library vs DirectXMath (MSVC) ===
-cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%source_dir%..\include" ^
+cl /nologo /std:c++latest /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%source_dir%..\include" ^
    /c "%source_dir%codegen_library.cpp" /FAs /Falibrary_msvc.asm /Folibrary_msvc.obj >library_msvc.log 2>&1
 if exist library_msvc.asm ( echo   [ OK ] library_msvc.asm ) else ( echo   [FAIL] see library_msvc.log )
 
 echo === library vs DirectXMath (clang-cl) ===
-clang-cl /nologo /std:c++20 /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%source_dir%..\include" ^
+clang-cl /nologo /std:c++latest /O2 /EHsc /arch:AVX2 /fp:fast /utf-8 /I"%source_dir%..\include" ^
    /c "%source_dir%codegen_library.cpp" /FA /Falibrary_clang.asm /Folibrary_clang.obj >library_clang.log 2>&1
 if exist library_clang.asm ( echo   [ OK ] library_clang.asm ) else ( echo   [FAIL] see library_clang.log )
 

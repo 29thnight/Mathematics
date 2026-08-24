@@ -9,6 +9,8 @@
 
 #include <mathematics/vector.hpp>
 
+#include <optional>
+
 namespace math {
 
 // Thirty-six bytes, packed. A row is three contiguous floats, so unlike
@@ -105,11 +107,10 @@ determinant(const matrix3x3& mat) noexcept {
          + x[0][2] * (x[1][0] * x[2][1] - x[1][1] * x[2][0]);
 }
 
-// Returns the identity unless the determinant is a finite non-zero, matching
-// matrix4x4's choice -- see the longer note there for why the guard rejects
-// infinities and NaN rather than only exact zero.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix3x3
-inverse(const matrix3x3& mat) noexcept {
+namespace detail {
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+try_inverse_matrix3x3(const matrix3x3& mat, matrix3x3& result) noexcept {
     const auto& x = mat.m;
 
     // The adjugate is the transpose of the cofactor matrix, so the row and
@@ -119,10 +120,10 @@ inverse(const matrix3x3& mat) noexcept {
     const float c02 = x[1][0] * x[2][1] - x[1][1] * x[2][0];
 
     const float det = x[0][0] * c00 + x[0][1] * c01 + x[0][2] * c02;
-    if (!detail::is_finite_non_zero(det)) return matrix3x3::identity();
+    if (!detail::is_finite_non_zero(det)) return false;
     const float inv_det = 1.0f / det;
 
-    return matrix3x3{
+    result = matrix3x3{
         c00 * inv_det,
         (x[0][2] * x[2][1] - x[0][1] * x[2][2]) * inv_det,
         (x[0][1] * x[1][2] - x[0][2] * x[1][1]) * inv_det,
@@ -134,6 +135,26 @@ inverse(const matrix3x3& mat) noexcept {
         c02 * inv_det,
         (x[0][1] * x[2][0] - x[0][0] * x[2][1]) * inv_det,
         (x[0][0] * x[1][1] - x[0][1] * x[1][0]) * inv_det};
+    return true;
+}
+
+} // namespace detail
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<matrix3x3>
+try_inverse(const matrix3x3& mat) noexcept {
+    matrix3x3 result;
+    if (!detail::try_inverse_matrix3x3(mat, result)) return std::nullopt;
+    return result;
+}
+
+// Returns the identity unless the determinant is a finite non-zero, matching
+// matrix4x4's choice -- see the longer note there for why the guard rejects
+// infinities and NaN rather than only exact zero.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix3x3
+inverse(const matrix3x3& mat) noexcept {
+    matrix3x3 result;
+    if (!detail::try_inverse_matrix3x3(mat, result)) return matrix3x3::identity();
+    return result;
 }
 
 // ------------------------------------------------------------------ comparison

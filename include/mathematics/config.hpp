@@ -35,6 +35,13 @@
 #  define MATHEMATICS_HAS_MULTIDIM_SUBSCRIPT 0
 #endif
 
+#if MATHEMATICS_HAS_CPP23 && defined(__cpp_lib_mdspan) \
+    && __cpp_lib_mdspan >= 202207L
+#  define MATHEMATICS_HAS_MDSPAN 1
+#else
+#  define MATHEMATICS_HAS_MDSPAN 0
+#endif
+
 // ---------------------------------------------------------------- compiler
 #if defined(__clang__)
 #  define MATHEMATICS_COMPILER_CLANG 1
@@ -160,6 +167,7 @@
 
 // ---------------------------------------------------------------- attributes
 #define MATHEMATICS_NODISCARD [[nodiscard]]
+#define MATHEMATICS_NODISCARD_MSG(message) [[nodiscard(message)]]
 
 // Prefer C++23's `if consteval`. On MSVC this is a performance feature, not a
 // spelling preference: with the C++20 fallback the compile-time branch is still

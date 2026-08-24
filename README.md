@@ -20,6 +20,8 @@ DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 �
 - `vector2/3/4`, `matrix3x3/4x4`, `quaternion`, `plane`, `ray`, `aabb`, `sphere` 제공
 - 벡터·행렬·쿼터니언·TRS·뷰/투영·교차 판정을 하나의 헤더 온리 API로 구성
 - 같은 API를 런타임 SIMD 경로와 `constexpr` 상수 평가에서 사용
+- 연속 점 집합은 `std::span`, 실패 가능한 역행렬·분해·raycast는 `std::optional` API 제공
+- 벡터 성분·행렬 행은 C++20 range view, 행렬은 C++23 `std::mdspan` view로 무복사 접근
 - DirectXMath 패리티 테스트와 스칼라 참조 테스트로 수치·관례를 교차 검증
 - MSVC, clang-cl, GCC, Clang과 x64/ARM64 백엔드를 CI에서 검증
 - `std::format` 지원은 `<mathematics/format.hpp>`로 선택적으로 제공
@@ -105,11 +107,59 @@ static_assert(math::cross(x, y) == math::vector3::unit_z());
 | 행렬 | `<mathematics/matrix.hpp>` 또는 개별 `matrix3x3/4x4.hpp` |
 | 쿼터니언·변환 | `<mathematics/quaternion.hpp>`, `<mathematics/transform.hpp>` |
 | 기하·교차 판정 | `<mathematics/geometry.hpp>` |
+| C++20 벡터·행렬 range view | `<mathematics/views.hpp>` |
+| 고정 extent range 종단 연산 | `<mathematics/ranges.hpp>` |
+| C++23 행렬 `mdspan` view | `<mathematics/mdspan.hpp>` |
 | 저수준 레지스터 API | `<mathematics/vec_reg.hpp>` |
 | `std::format` | `<mathematics/format.hpp>` |
 
 `format.hpp`는 `<format>`의 컴파일 비용을 사용하지 않는 번역 단위에 부과하지 않도록
 우산 헤더에서 의도적으로 제외했다.
+
+### C++20 값 기반 API
+
+기존 포인터/출력 매개변수 API는 호환성을 위해 유지하며, 새 코드는 소유권과 실패를
+타입으로 드러내는 오버로드를 사용할 수 있다.
+
+```cpp
+const math::aabb bounds = math::aabb_from_points(std::span{points});
+
+if (const auto distance = math::raycast(input_ray, bounds)) {
+    use_hit(input_ray.point_at(*distance));
+}
+
+if (const auto inverse_world = math::try_inverse(world)) {
+    use_inverse(*inverse_world);
+}
+
+if (const auto parts = math::decompose(world)) {
+    use_trs(parts->scale, parts->rotation, parts->translation);
+}
+```
+
+`components(vector)`와 `rows(matrix)`는 C++20 range 알고리즘에 연결되는 non-owning
+view다. C++23 표준 라이브러리가 `std::mdspan`을 제공하면 `as_mdspan(matrix)`와
+복사 없는 `transpose_view(matrix)`도 활성화된다. 모든 view는 원본보다 오래 살 수 없다.
+
+`components`와 `rows`의 extent는 반환 타입에 보존된다. 작은 고정 범위의 루프를
+컴파일 타임에 전개하려면 `<mathematics/ranges.hpp>`의 `fold_fixed`,
+`for_each_fixed`, `transform_fixed`를 사용할 수 있다. 이 연산들은 분기를 제거하지만
+사용자 함수의 부작용과 컴파일러의 SIMD 판단에 따라 직접 SIMD 코드보다 빠르다고
+보장하지는 않는다.
+
+`math::views::transform_fixed`는 extent를 잃지 않는 lazy view라서 range-for와 fixed
+terminal 양쪽에 사용할 수 있다. `fold_fixed`와 `for_each_fixed`, 출력용
+`transform_fixed_to`는 C++20에서도 파이프로 연결된다.
+
+```cpp
+auto squared = math::components(color)
+             | math::views::transform_fixed([](float x) { return x * x; });
+
+for (float x : squared) consume(x);
+
+float sum = squared
+          | math::ranges::fold_fixed(0.0f, std::plus<>{});
+```
 
 ## 요구 사항과 지원 환경
 
@@ -119,7 +169,7 @@ static_assert(math::cross(x, y) == math::vector3::unit_z());
 
 | 환경 | CI 검증 경로 |
 |------|-------------|
-| Windows x64 / MSVC | Release, Debug, 스칼라 폴백, SSE2 baseline |
+| Windows x64 / MSVC | C++23 Release, 강제 C++20 Release, Debug, 스칼라 폴백, SSE2 baseline |
 | Windows x64 / clang-cl | Release |
 | Linux x64 / GCC·Clang | Release |
 | Linux ARM64 / GCC·Clang | NEON Release |
@@ -140,6 +190,7 @@ scripts\build.bat msvc-release
 | 프리셋 | 목적 |
 |--------|------|
 | `msvc-release` | MSVC AVX2/FMA Release |
+| `msvc-cpp20-release` | 공개 최소 기준을 강제하는 MSVC C++20 Release |
 | `msvc-debug` | MSVC Debug |
 | `clang-release` | clang-cl AVX2/FMA Release |
 | `scalar-release` | SIMD를 끈 스칼라 폴백 |
@@ -195,6 +246,7 @@ scripts\open_vs.bat
 | `MATHEMATICS_BUILD_TESTS` | 최상위 `ON`, 하위 프로젝트 `OFF` | GoogleTest 테스트 빌드 |
 | `MATHEMATICS_BUILD_BENCH` | 최상위 `ON`, 하위 프로젝트 `OFF` | Google Benchmark 빌드 |
 | `MATHEMATICS_BUILD_TOOLS` | 최상위 `ON`, 하위 프로젝트 `OFF` | 설정 보고 도구 빌드 |
+| `MATHEMATICS_CXX_STANDARD` | `AUTO` | `AUTO`, `20`, `23` 중 자체 타깃 언어 표준 선택 |
 | `MATHEMATICS_FORCE_SCALAR` | `OFF` | SIMD 대신 스칼라 백엔드 강제 |
 | `MATHEMATICS_BASELINE_SSE2` | `OFF` | x86에서 SSE2 경로만 사용 |
 | `MATHEMATICS_ENABLE_COVERAGE` | `OFF` | GCC/gcov line coverage 계측 |

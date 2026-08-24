@@ -18,6 +18,8 @@
 
 #include <mathematics/vector.hpp>
 
+#include <optional>
+
 namespace math {
 
 // Sixty-four bytes, standard layout, four-byte aligned -- it uploads to a
@@ -351,8 +353,8 @@ struct minors4x4 {
 // (adj * M)[0][0] is the determinant by definition, and column 0 of M is row 0
 // of the transpose, which this already has.
 #if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_NEON
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE matrix4x4
-inverse_simd(const matrix4x4& mat) noexcept {
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE bool
+try_inverse_simd(const matrix4x4& mat, matrix4x4& result) noexcept {
     const vec_reg r0 = mat.row(0);
     const vec_reg r1 = mat.row(1);
     const vec_reg r2 = mat.row(2);
@@ -412,15 +414,14 @@ inverse_simd(const matrix4x4& mat) noexcept {
     // and broadcasting the result back costs a round trip through the scalar
     // unit for no benefit.
     const vec_reg det = dot4(adj0, t0);
-    if (!detail::is_finite_non_zero(get_x(det))) return matrix4x4::identity();
+    if (!detail::is_finite_non_zero(get_x(det))) return false;
 
     const vec_reg inv_det = div(splat(1.0f), det);
-    matrix4x4 result;
     result.set_row(0, mul(adj0, inv_det));
     result.set_row(1, mul(adj1, inv_det));
     result.set_row(2, mul(adj2, inv_det));
     result.set_row(3, mul(adj3, inv_det));
-    return result;
+    return true;
 }
 #endif
 
@@ -469,18 +470,17 @@ determinant(const matrix4x4& mat) noexcept {
 // scalar build than on an SSE one.
 namespace detail {
 
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix4x4
-inverse_scalar(const matrix4x4& mat) noexcept {
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+try_inverse_scalar(const matrix4x4& mat, matrix4x4& r) noexcept {
     const detail::minors4x4 k = detail::compute_minors(mat);
 
     const float det = k.s0 * k.c5 - k.s1 * k.c4 + k.s2 * k.c3
                     + k.s3 * k.c2 - k.s4 * k.c1 + k.s5 * k.c0;
-    if (!detail::is_finite_non_zero(det)) return matrix4x4::identity();
+    if (!detail::is_finite_non_zero(det)) return false;
 
     const float inv_det = 1.0f / det;
     const auto& x = mat.m;
 
-    matrix4x4 r;
     r.m[0][0] = ( x[1][1] * k.c5 - x[1][2] * k.c4 + x[1][3] * k.c3) * inv_det;
     r.m[0][1] = (-x[0][1] * k.c5 + x[0][2] * k.c4 - x[0][3] * k.c3) * inv_det;
     r.m[0][2] = ( x[3][1] * k.s5 - x[3][2] * k.s4 + x[3][3] * k.s3) * inv_det;
@@ -500,7 +500,24 @@ inverse_scalar(const matrix4x4& mat) noexcept {
     r.m[3][1] = ( x[0][0] * k.c3 - x[0][1] * k.c1 + x[0][2] * k.c0) * inv_det;
     r.m[3][2] = (-x[3][0] * k.s3 + x[3][1] * k.s1 - x[3][2] * k.s0) * inv_det;
     r.m[3][3] = ( x[2][0] * k.s3 - x[2][1] * k.s1 + x[2][2] * k.s0) * inv_det;
+    return true;
+}
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix4x4
+inverse_scalar(const matrix4x4& mat) noexcept {
+    matrix4x4 r;
+    if (!try_inverse_scalar(mat, r)) return matrix4x4::identity();
     return r;
+}
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+try_inverse_matrix4x4(const matrix4x4& mat, matrix4x4& result) noexcept {
+#if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_NEON
+    MATHEMATICS_IF_CONSTEVAL { return try_inverse_scalar(mat, result); }
+    return try_inverse_simd(mat, result);
+#else
+    return try_inverse_scalar(mat, result);
+#endif
 }
 
 } // namespace detail
@@ -529,14 +546,18 @@ inverse_scalar(const matrix4x4& mat) noexcept {
 // in both paths, and those agree. For anything nearer the edge, treat inverse's
 // output as unspecified and ask Determinant, which is one function with one
 // answer, rather than inferring singularity from inverse returning the identity.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<matrix4x4>
+try_inverse(const matrix4x4& mat) noexcept {
+    matrix4x4 result;
+    if (!detail::try_inverse_matrix4x4(mat, result)) return std::nullopt;
+    return result;
+}
+
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix4x4
 inverse(const matrix4x4& mat) noexcept {
-#if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_NEON
-    MATHEMATICS_IF_CONSTEVAL { return detail::inverse_scalar(mat); }
-    return detail::inverse_simd(mat);
-#else
-    return detail::inverse_scalar(mat);
-#endif
+    matrix4x4 result;
+    if (!detail::try_inverse_matrix4x4(mat, result)) return matrix4x4::identity();
+    return result;
 }
 
 // ------------------------------------------------------------------ comparison

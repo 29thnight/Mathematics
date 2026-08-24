@@ -2,7 +2,7 @@
 REM Configure + build + test one preset inside a Visual Studio dev environment.
 REM Usage: scripts\build.bat [preset]        (default: msvc-release)
 REM
-REM Presets: msvc-release, msvc-debug, clang-release, scalar-release,
+REM Presets: msvc-release, msvc-cpp20-release, msvc-debug, clang-release, scalar-release,
 REM          vs2026-release, vs2026-debug.
 REM
 REM The vs2026-* names are build presets of the single "vs2026" configure

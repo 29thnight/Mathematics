@@ -21,6 +21,8 @@
 #include <mathematics/scalar.hpp>
 #include <mathematics/vector.hpp>
 
+#include <optional>
+
 namespace math {
 
 // ------------------------------------------------------------ basic transforms
@@ -102,6 +104,12 @@ compose(const vector3& scale, const quaternion& rotation,
     return m;
 }
 
+struct decomposed_transform {
+    vector3 scale;
+    quaternion rotation;
+    vector3 translation;
+};
+
 // Splits an affine transform back into scale, rotation and translation.
 //
 // Returns false, and leaves the outputs untouched, when the matrix has no such
@@ -118,7 +126,8 @@ compose(const vector3& scale, const quaternion& rotation,
 // Skew is not representable either, and unlike reflection it is not detected --
 // a sheared matrix decomposes into something that is not equal to it. Compose
 // and Decompose round-trip exactly for matrices Compose could have produced.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+MATHEMATICS_NODISCARD_MSG("output values are valid only when decompose returns true")
+MATHEMATICS_INLINE constexpr bool
 decompose(const matrix4x4& m, vector3& scale_out, quaternion& rotation_out,
           vector3& translation_out) noexcept {
     const vector3 r0{m.m[0][0], m.m[0][1], m.m[0][2]};
@@ -150,6 +159,15 @@ decompose(const matrix4x4& m, vector3& scale_out, quaternion& rotation_out,
     rotation_out = quaternion_from_rotation_matrix(basis);
     translation_out = vector3{m.m[3][0], m.m[3][1], m.m[3][2]};
     return true;
+}
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr
+std::optional<decomposed_transform> decompose(const matrix4x4& m) noexcept {
+    decomposed_transform result{};
+    if (!decompose(m, result.scale, result.rotation, result.translation)) {
+        return std::nullopt;
+    }
+    return result;
 }
 
 // ------------------------------------------------------------------- view

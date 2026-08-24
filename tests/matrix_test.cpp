@@ -328,6 +328,25 @@ TEST(matrix_inverse, singular_returns_identity) {
                 matrix3x3::identity());
 }
 
+TEST(matrix_inverse, try_inverse_reports_failure_without_an_identity_sentinel) {
+    const matrix4x4 invertible{2, 0, 0, 0,
+                               0, 3, 0, 0,
+                               0, 0, 4, 0,
+                               10, 20, 30, 1};
+    const auto inverse4 = math::try_inverse(invertible);
+    ASSERT_TRUE(inverse4.has_value());
+    EXPECT_TRUE(math::near_equal(*inverse4, inverse(invertible), 1e-5f));
+    EXPECT_TRUE(math::near_equal(invertible * *inverse4, matrix4x4::identity(), 1e-5f));
+    EXPECT_FALSE(math::try_inverse(counting_matrix).has_value());
+
+    const matrix3x3 invertible3{2, 0, 0, 0, 3, 0, 0, 0, 4};
+    const auto inverse3 = math::try_inverse(invertible3);
+    ASSERT_TRUE(inverse3.has_value());
+    EXPECT_TRUE(math::near_equal(*inverse3, inverse(invertible3), 1e-5f));
+    EXPECT_FALSE(math::try_inverse(matrix3x3{1, 2, 3, 2, 4, 6, 7, 8, 9})
+                     .has_value());
+}
+
 // inverse has two implementations -- a vectorized one for run time and the
 // scalar Laplace expansion it was derived from, which also serves constant
 // evaluation and the scalar backend. Two implementations of one contract need
@@ -339,6 +358,13 @@ static_assert(inverse(matrix4x4{2, 0, 0, 0,
                                 0, 4, 0, 0,
                                 0, 0, 8, 0,
                                 0, 0, 0, 1})(1, 1) == 0.25f);
+constexpr auto compile_time_inverse = try_inverse(matrix4x4{2, 0, 0, 0,
+                                                             0, 4, 0, 0,
+                                                             0, 0, 8, 0,
+                                                             0, 0, 0, 1});
+static_assert(compile_time_inverse.has_value());
+static_assert((*compile_time_inverse)(2, 2) == 0.125f);
+static_assert(!try_inverse(counting_matrix).has_value());
 
 // The two above are diagonal, so every off-diagonal cofactor is zero and a sign
 // or minor-index error in the expansion contributes nothing to check. This one
@@ -582,6 +608,8 @@ static_assert(determinant(asymmetric_matrix3) == 1.0f);
 static_assert(inverse(asymmetric_matrix3) == matrix3x3{-24,  18,   5,
                                             20, -15,  -4,
                                             -5,   4,   1});
+static_assert(try_inverse(asymmetric_matrix3).has_value());
+static_assert(*try_inverse(asymmetric_matrix3) == inverse(asymmetric_matrix3));
 static_assert((asymmetric_matrix3 * matrix3x3::identity()) == asymmetric_matrix3);
 static_assert((vector3(1, 0, 0) * asymmetric_matrix3) == vector3(1, 2, 3));
 

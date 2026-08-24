@@ -136,6 +136,70 @@ math::aabb b = math::aabb::from_min_max(                   // [0,1] 상자 — �
     math::vector3{0,0,0}, math::vector3{1,1,1});
 ```
 
+### C++20 range view와 C++23 mdspan
+
+`<mathematics/views.hpp>`는 소유 타입을 바꾸지 않고 벡터 성분과 행렬 행을 range로
+노출한다. 반환값은 원본을 참조하며 임시 객체에는 호출할 수 없다.
+
+```cpp
+math::vector4 color{1, 0.5f, 0.25f, 1};
+for (float& component : math::components(color)) component *= 0.5f;
+
+math::matrix4x4 world = math::matrix4x4::identity();
+for (std::span<float, 4> row : math::rows(world)) {
+    serialize(row);
+}
+```
+
+`components`와 `rows`는 extent를 반환 타입에 보존한다.
+`math::views::transform_fixed`는 이 extent를 다음 view로 전달하므로 일반 range-for와
+고정 크기 종단 연산 양쪽에서 사용할 수 있다.
+
+```cpp
+auto squared =
+    math::components(color) |
+    math::views::transform_fixed([](float value) { return value * value; });
+
+for (float value : squared) consume(value);
+
+float sum = squared |
+    math::ranges::fold_fixed(0.0f, std::plus<>{});
+
+math::components(color) |
+    math::ranges::for_each_fixed(
+        [](float& value) { value *= 0.5f; });
+
+std::array<float, 4> output;
+math::components(color) |
+    math::ranges::transform_fixed_to(
+        output.begin(), [](float value) { return value * value; });
+```
+
+`fold_fixed`, `for_each_fixed`, `transform_fixed_to`는 원소 접근을 extent만큼 컴파일
+타임에 전개한다. 함수 호출 형태인 `fold_fixed(range, initial, operation)`도 그대로
+지원한다. 파이프 closure 자체는 어셈블리에서 직접 호출과 동일하게 제거된다.
+
+range-for는 정상적인 iterator 루프이므로 MSVC에서 자동 전개가 보장되지는 않는다.
+또한 callback 호출 순서와 부작용을 보존해야 하므로 fixed terminal도 항상 SIMD가 되는
+것은 아니다. SIMD가 중요한 전용 산술은 기존 벡터 연산을 우선한다.
+
+C++23 표준 라이브러리에 `std::mdspan`이 있으면 `<mathematics/mdspan.hpp>`가 고정
+extent 2차원 view를 제공한다. `as_mdspan`은 `m[row][column]`과 같은 매핑이고,
+`transpose_view`는 복사 없이 두 인덱스만 뒤집는다.
+
+```cpp
+#if MATHEMATICS_HAS_MDSPAN
+auto view = math::as_mdspan(world);
+view[2, 1] = 3.0f;                 // world.m[2][1]
+
+auto transposed = math::transpose_view(world);
+transposed[1, 2] = 4.0f;           // world.m[2][1]
+#endif
+```
+
+이 view들은 수명도 늘리지 않고 데이터를 소유하지도 않는다. 행렬 연산 자체는 기존
+`matrix4x4`/SIMD API를 사용하고, view는 검사·직렬화·범용 알고리즘 연결에 사용한다.
+
 ---
 
 ## 4. 퇴화 입력의 규약
@@ -193,7 +257,12 @@ raycast(r, a, d)  -> bool + float  맞는가, 얼마나 멀리
   `if consteval`이 없으면 컴파일 타임 분기가 런타임 표현을 오염시킨다.
   빌드 시 경고가 나온다.
 - **`/fp:fast`는 벤치용, `/fp:precise`는 테스트용.** 프로젝트가 그렇게 나눠
-  쓴다. `_est` 접미사 함수(`normalize_est` 등)는 정밀도를 속도와 맞바꾼다.
+  쓴다. `normalize_unchecked`는 정확한 제곱근을 유지하고 입력 검사만 생략하며,
+  `_est` 접미사 함수(`normalize_est` 등)는 정밀도를 속도와 맞바꾼다.
+- **view는 연결 API다.** `components`와 `rows`는 generic range 코드에 편리하지만
+  행렬 핫 루프에서는 직접 멤버 접근과 기존 SIMD 연산을 쓴다. `as_mdspan`과
+  `transpose_view`는 원소 접근이 직접 접근과 같은 코드가 되는지 `spike`의 어셈블리
+  프로브로 확인한다. 포인터/count AABB 경로도 범위 오버로드와 독립 루프를 유지한다.
 
 측정치는 [BASELINE.md](BASELINE.md)에 있다.
 

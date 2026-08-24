@@ -22,6 +22,8 @@
 #include <mathematics/plane.hpp>
 #include <mathematics/ray.hpp>
 
+#include <optional>
+
 namespace math {
 
 // ---------------------------------------------------------------- containment
@@ -174,7 +176,8 @@ classify(const aabb& box, const plane& input_plane) noexcept {
 // Substituting the ray into the sphere equation gives a quadratic in t. The
 // linear coefficient is folded in advance (b is half the usual one), which
 // removes the factors of two and the 4ac from the discriminant.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+MATHEMATICS_NODISCARD_MSG("distance_out is valid only when raycast returns true")
+MATHEMATICS_INLINE constexpr bool
 raycast(const ray& input_ray, const sphere& input_sphere,
         float& distance_out) noexcept {
     const vector3 to_center = input_ray.origin - input_sphere.center;
@@ -199,6 +202,13 @@ raycast(const ray& input_ray, const sphere& input_sphere,
     return true;
 }
 
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<float>
+raycast(const ray& input_ray, const sphere& input_sphere) noexcept {
+    float distance = 0.0f;
+    if (!raycast(input_ray, input_sphere, distance)) return std::nullopt;
+    return distance;
+}
+
 // The slab method: clip the ray against each pair of parallel faces in turn
 // and keep the running entry and exit distances. They cross when the ray
 // misses.
@@ -209,7 +219,8 @@ raycast(const ray& input_ray, const sphere& input_sphere,
 // with no branch. The one case that needs care is an origin exactly on a face
 // of a zero-width slab, where the division is 0/0 -- that NaN would make every
 // comparison false and silently report a miss, so it is checked for.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+MATHEMATICS_NODISCARD_MSG("distance_out is valid only when raycast returns true")
+MATHEMATICS_INLINE constexpr bool
 raycast(const ray& input_ray, const aabb& box, float& distance_out) noexcept {
     if (box.is_empty() ||
         !detail::is_finite_non_zero(length_sq(input_ray.direction))) {
@@ -253,10 +264,18 @@ raycast(const ray& input_ray, const aabb& box, float& distance_out) noexcept {
     return true;
 }
 
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<float>
+raycast(const ray& input_ray, const aabb& box) noexcept {
+    float distance = 0.0f;
+    if (!raycast(input_ray, box, distance)) return std::nullopt;
+    return distance;
+}
+
 // A plane is two-sided here: a ray hits it from either face. It misses only
 // when it runs parallel, and a ray lying exactly in the plane counts as a miss
 // rather than an infinity of hits -- there is no single distance to report.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+MATHEMATICS_NODISCARD_MSG("distance_out is valid only when raycast returns true")
+MATHEMATICS_INLINE constexpr bool
 raycast(const ray& input_ray, const plane& input_plane,
         float& distance_out) noexcept {
     const float slope = dot_normal(input_plane, input_ray.direction);
@@ -269,11 +288,19 @@ raycast(const ray& input_ray, const plane& input_plane,
     return true;
 }
 
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<float>
+raycast(const ray& input_ray, const plane& input_plane) noexcept {
+    float distance = 0.0f;
+    if (!raycast(input_ray, input_plane, distance)) return std::nullopt;
+    return distance;
+}
+
 // Moeller-Trumbore, which finds the barycentric coordinates and the distance
 // without ever building the triangle's plane. Single-sided is a rendering
 // choice, not a geometric one, so this hits from both faces and leaves the
 // winding test to the caller who knows their convention.
-MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr bool
+MATHEMATICS_NODISCARD_MSG("distance_out is valid only when raycast_triangle returns true")
+MATHEMATICS_INLINE constexpr bool
 raycast_triangle(const ray& input_ray, const vector3& v0, const vector3& v1,
                 const vector3& v2, float& distance_out) noexcept {
     const vector3 edge1 = v1 - v0;
@@ -298,6 +325,14 @@ raycast_triangle(const ray& input_ray, const vector3& v0, const vector3& v1,
 
     distance_out = t;
     return true;
+}
+
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr std::optional<float>
+raycast_triangle(const ray& input_ray, const vector3& v0, const vector3& v1,
+                 const vector3& v2) noexcept {
+    float distance = 0.0f;
+    if (!raycast_triangle(input_ray, v0, v1, v2, distance)) return std::nullopt;
+    return distance;
 }
 
 } // namespace math

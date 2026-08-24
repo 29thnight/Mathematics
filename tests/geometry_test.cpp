@@ -11,8 +11,11 @@
 
 #include <mathematics/geometry.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
+#include <ranges>
+#include <span>
 
 #if __has_include(<DirectXCollision.h>)
 #  include <DirectXCollision.h>
@@ -221,8 +224,10 @@ TEST(aabb, merge_and_expand) {
 TEST(aabb, from_points_is_the_tightest_box) {
     const vector3 points[] = {{1, 5, -2}, {-3, 0, 4}, {0, 2, 1}};
     const aabb box = math::aabb_from_points(points, 3);
+    const aabb span_box = math::aabb_from_points(std::span<const vector3>{points});
     EXPECT_TRUE(math::near_equal(box.min(), vector3{-3, 0, -2}, epsilon));
     EXPECT_TRUE(math::near_equal(box.max(), vector3{1, 5, 4}, epsilon));
+    EXPECT_EQ(span_box, box) << "span and pointer overloads must agree";
     for (const vector3& p : points) EXPECT_TRUE(math::intersects(box, p));
 
     // Empty and null ranges give the empty box rather than reading memory.
@@ -231,6 +236,51 @@ TEST(aabb, from_points_is_the_tightest_box) {
     // one point makes a degenerate box at that point.
     EXPECT_TRUE(math::near_equal(math::aabb_from_points(points, 1),
                                  aabb{vector3{1, 5, -2}, vector3{0, 0, 0}}, epsilon));
+}
+
+TEST(aabb, from_points_accepts_lazy_non_contiguous_ranges) {
+    struct sample {
+        vector3 position;
+        bool visible;
+    };
+
+    const std::array samples{
+        sample{vector3{10, 20, 30}, false},
+        sample{vector3{1, 5, -2}, true},
+        sample{vector3{-3, 0, 4}, true},
+        sample{vector3{100, 200, 300}, false}};
+
+    auto visible_positions =
+        samples |
+        std::views::filter([](const sample& value) { return value.visible; }) |
+        std::views::transform([](const sample& value) { return value.position; });
+    const aabb box = math::aabb_from_points(visible_positions);
+
+    EXPECT_EQ(box.min(), vector3(-3, 0, -2));
+    EXPECT_EQ(box.max(), vector3(1, 5, 4));
+
+    auto empty_positions =
+        samples |
+        std::views::filter([](const sample&) { return false; }) |
+        std::views::transform([](const sample& value) { return value.position; });
+    EXPECT_TRUE(math::aabb_from_points(empty_positions).is_empty());
+}
+
+TEST(aabb, midpoint_avoids_extreme_endpoint_overflow) {
+    const float largest = std::numeric_limits<float>::max();
+
+    const aabb full = aabb::from_min_max(vector3{-largest, -largest, -largest},
+                                         vector3{largest, largest, largest});
+    EXPECT_EQ(full.center, vector3{}) << "(-max + max) / 2 is exactly zero";
+    EXPECT_EQ(full.extents, vector3(largest));
+    EXPECT_TRUE(std::isfinite(full.center.x));
+    EXPECT_TRUE(std::isfinite(full.extents.x));
+
+    const aabb point = aabb::from_min_max(vector3(largest), vector3(largest));
+    EXPECT_EQ(point.center, vector3(largest));
+    EXPECT_EQ(point.extents, vector3{});
+    EXPECT_TRUE(std::isfinite(point.center.x))
+        << "the former (maximum + maximum) path overflowed here";
 }
 
 TEST(aabb, closest_point_clamps_per_axis) {
@@ -409,6 +459,35 @@ TEST(raycast, sphere_from_outside) {
     ASSERT_TRUE(math::raycast(ray{vector3{0, 0, -5}, vector3{0, 0, 1}}, s,
                                distance));
     EXPECT_NEAR(distance, 4.0f, 1e-4f) << "the NEAR surface, not the far one";
+}
+
+TEST(raycast, optional_overloads_match_the_out_parameter_apis) {
+    const ray input_ray{vector3{0, 0, -5}, vector3{0, 0, 1}};
+    const sphere input_sphere{vector3{}, 1.0f};
+    const aabb box{vector3{}, vector3{1, 1, 1}};
+    const plane input_plane = math::plane_from_point_normal(vector3{}, vector3{0, 0, 1});
+    const vector3 v0{-1, -1, 0}, v1{1, -1, 0}, v2{0, 1, 0};
+
+    float legacy_distance = -1.0f;
+    ASSERT_TRUE(math::raycast(input_ray, input_sphere, legacy_distance));
+    ASSERT_TRUE(math::raycast(input_ray, input_sphere).has_value());
+    EXPECT_FLOAT_EQ(*math::raycast(input_ray, input_sphere), legacy_distance);
+
+    ASSERT_TRUE(math::raycast(input_ray, box, legacy_distance));
+    EXPECT_FLOAT_EQ(math::raycast(input_ray, box).value(), legacy_distance);
+
+    ASSERT_TRUE(math::raycast(input_ray, input_plane, legacy_distance));
+    EXPECT_FLOAT_EQ(math::raycast(input_ray, input_plane).value(), legacy_distance);
+
+    ASSERT_TRUE(math::raycast_triangle(input_ray, v0, v1, v2, legacy_distance));
+    EXPECT_FLOAT_EQ(math::raycast_triangle(input_ray, v0, v1, v2).value(),
+                    legacy_distance);
+
+    const ray away{vector3{0, 0, 5}, vector3{0, 0, 1}};
+    EXPECT_FALSE(math::raycast(away, input_sphere).has_value());
+    EXPECT_FALSE(math::raycast(away, box).has_value());
+    EXPECT_FALSE(math::raycast(away, input_plane).has_value());
+    EXPECT_FALSE(math::raycast_triangle(away, v0, v1, v2).has_value());
 }
 
 // The convention that matters: a ray is a half-line.
@@ -604,6 +683,21 @@ static_assert(math::classify(sphere{vector3{0, 0, 5}, 1.0f},
                               plane{0, 0, 1, 0}) == plane_side::front);
 static_assert(math::merge(aabb::from_min_max(vector3{0, 0, 0}, vector3{1, 1, 1}),
                            vector3{3, 0, 0}).max().x == 3.0f);
+constexpr std::array compile_time_points{
+    vector3{1, 5, -2}, vector3{-3, 0, 4}, vector3{0, 2, 1}};
+constexpr aabb compile_time_points_box =
+    math::aabb_from_points(std::span<const vector3>{compile_time_points});
+static_assert(compile_time_points_box.min() == vector3{-3, 0, -2});
+static_assert(compile_time_points_box.max() == vector3{1, 5, 4});
+constexpr aabb compile_time_range_points_box =
+    math::aabb_from_points(compile_time_points);
+static_assert(compile_time_range_points_box == compile_time_points_box);
+constexpr float compile_time_largest = std::numeric_limits<float>::max();
+static_assert(aabb::from_min_max(vector3{-compile_time_largest},
+                                 vector3{compile_time_largest}).center == vector3{});
+static_assert(aabb::from_min_max(vector3{compile_time_largest},
+                                 vector3{compile_time_largest}).center ==
+              vector3{compile_time_largest});
 
 namespace {
 // raycast takes an out-parameter, so it needs a wrapper to be asserted.
@@ -623,6 +717,11 @@ constexpr float compile_time_box_raycast() {
 } // namespace
 static_assert(compile_time_raycast() > 3.99f && compile_time_raycast() < 4.01f);
 static_assert(compile_time_box_raycast() > 3.99f && compile_time_box_raycast() < 4.01f);
+constexpr auto compile_time_optional_hit =
+    math::raycast(ray{vector3{0, 0, -5}, vector3{0, 0, 1}},
+                  sphere{vector3{}, 1.0f});
+static_assert(compile_time_optional_hit.has_value());
+static_assert(*compile_time_optional_hit > 3.99f && *compile_time_optional_hit < 4.01f);
 
 // ------------------------------------------------------ DirectXCollision parity
 #if MATHEMATICS_TEST_HAS_DXCOLLISION

@@ -25,11 +25,14 @@
 
 #include <mathematics/config.hpp>
 #include <mathematics/geometry.hpp>
+#include <mathematics/mdspan.hpp>
 #include <mathematics/matrix.hpp>
 #include <mathematics/quaternion.hpp>
+#include <mathematics/ranges.hpp>
 #include <mathematics/scalar.hpp>
 #include <mathematics/transform.hpp>
 #include <mathematics/vec_reg.hpp>
 #include <mathematics/vector.hpp>
+#include <mathematics/views.hpp>
 
 #endif // MATHEMATICS_MATHEMATICS_HPP

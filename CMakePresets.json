@@ -29,6 +29,15 @@
       }
     },
     {
+      "name": "msvc-cpp20-release",
+      "displayName": "MSVC x64 C++20 Release",
+      "description": "Forces the advertised C++20 floor instead of auto-selecting C++23.",
+      "inherits": "msvc-release",
+      "cacheVariables": {
+        "MATHEMATICS_CXX_STANDARD": "20"
+      }
+    },
+    {
       "name": "msvc-debug",
       "displayName": "MSVC x64 Debug",
       "inherits": "ninja",
@@ -84,6 +93,7 @@
   ],
   "buildPresets": [
     { "name": "msvc-release", "configurePreset": "msvc-release" },
+    { "name": "msvc-cpp20-release", "configurePreset": "msvc-cpp20-release" },
     { "name": "msvc-debug", "configurePreset": "msvc-debug" },
     { "name": "clang-release", "configurePreset": "clang-release" },
     { "name": "scalar-release", "configurePreset": "scalar-release" },
@@ -105,6 +115,11 @@
     {
       "name": "msvc-release",
       "configurePreset": "msvc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "msvc-cpp20-release",
+      "configurePreset": "msvc-cpp20-release",
       "output": { "outputOnFailure": true }
     },
     {
