@@ -13,7 +13,10 @@ add_executable(mathf_tests
     matrix_test.cpp
     scalar_test.cpp
     quaternion_test.cpp
-    transform_test.cpp)
+    transform_test.cpp
+    geometry_test.cpp
+    format_test.cpp
+    guide_test.cpp)
 
 # Lets the test sources include "support/reg_testing.hpp" by that path.
 target_include_directories(mathf_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

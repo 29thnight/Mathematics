@@ -23,6 +23,7 @@
 #define MATHF_MATHF_HPP
 
 #include <mathf/config.hpp>
+#include <mathf/geometry.hpp>
 #include <mathf/matrix.hpp>
 #include <mathf/quaternion.hpp>
 #include <mathf/scalar.hpp>

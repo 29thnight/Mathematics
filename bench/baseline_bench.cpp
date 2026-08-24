@@ -1256,4 +1256,179 @@ static void BM_DXMath_SinCos(benchmark::State& state) {
 BENCHMARK(BM_DXMath_SinCos);
 #endif
 
+// ================================ audit gap: the gated operations with no bench
+// docs/PLAN.md 4.2 names Cross, Transpose and a batch vertex transform among
+// the operations that must stay within +-5% of DirectXMath. The Phase 5 audit
+// found all three had never been measured -- a gate you cannot evaluate is not
+// a gate. These close that.
+namespace {
+constexpr int kStreamCount = 512;
+
+const std::vector<mathf::Vector3>& StreamData() {
+    static const std::vector<mathf::Vector3> data = [] {
+        std::mt19937 rng(kSeed + 7);
+        std::uniform_real_distribution<float> dist(-10.0f, 10.0f);
+        std::vector<mathf::Vector3> out(kStreamCount);
+        for (auto& v : out) v = mathf::Vector3{dist(rng), dist(rng), dist(rng)};
+        return out;
+    }();
+    return data;
+}
+} // namespace
+
+// Cross has a fixed point at the identity: crossing a vector with a constant
+// and renormalizing keeps the chain bounded, which a raw product does not --
+// it grows without limit and ends in infinities.
+static void BM_Mathf_Cross_Latency(benchmark::State& state) {
+    mathf::Vector3 acc{1.0f, 0.0f, 0.0f};
+    const mathf::Vector3 axis{0.0f, 0.0f, 1.0f};
+    for (auto _ : state) {
+        acc = mathf::Normalize(mathf::Cross(acc, axis));
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (!(mathf::Length(acc) > 0.5f && mathf::Length(acc) < 2.0f)) {
+        state.SkipWithError("accumulator drifted");
+    }
+}
+BENCHMARK(BM_Mathf_Cross_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Cross_Latency(benchmark::State& state) {
+    DirectX::XMVECTOR acc = DirectX::XMVectorSet(1, 0, 0, 0);
+    const DirectX::XMVECTOR axis = DirectX::XMVectorSet(0, 0, 1, 0);
+    for (auto _ : state) {
+        acc = DirectX::XMVector3Normalize(DirectX::XMVector3Cross(acc, axis));
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+}
+BENCHMARK(BM_DXMath_Cross_Latency);
+#endif
+
+static void BM_Mathf_Cross_Throughput(benchmark::State& state) {
+    const auto& d = StreamData();
+    std::vector<mathf::Vector3> out(kStreamCount / 2);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < kStreamCount / 2; ++i) {
+            out[static_cast<size_t>(i)] =
+                mathf::Cross(d[static_cast<size_t>(i)],
+                             d[static_cast<size_t>(i + kStreamCount / 2)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kStreamCount / 2));
+}
+BENCHMARK(BM_Mathf_Cross_Throughput);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Cross_Throughput(benchmark::State& state) {
+    const auto& d = StreamData();
+    std::vector<DirectX::XMFLOAT3> out(kStreamCount / 2);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < kStreamCount / 2; ++i) {
+            const auto* a = reinterpret_cast<const DirectX::XMFLOAT3*>(
+                &d[static_cast<size_t>(i)].x);
+            const auto* b = reinterpret_cast<const DirectX::XMFLOAT3*>(
+                &d[static_cast<size_t>(i + kStreamCount / 2)].x);
+            DirectX::XMStoreFloat3(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMVector3Cross(DirectX::XMLoadFloat3(a),
+                                        DirectX::XMLoadFloat3(b)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kStreamCount / 2));
+}
+BENCHMARK(BM_DXMath_Cross_Throughput);
+#endif
+
+static void BM_Mathf_Matrix4x4_Transpose(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<mathf::Matrix4x4> out(kMatrixBatch);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < kMatrixBatch; ++i) {
+            out[static_cast<size_t>(i)] = Transpose(d[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kMatrixBatch);
+}
+BENCHMARK(BM_Mathf_Matrix4x4_Transpose);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Matrix4x4_Transpose(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<DirectX::XMFLOAT4X4> out(kMatrixBatch);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < kMatrixBatch; ++i) {
+            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
+                &d[static_cast<size_t>(i)].m[0][0]);
+            DirectX::XMStoreFloat4x4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(q)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kMatrixBatch);
+}
+BENCHMARK(BM_DXMath_Matrix4x4_Transpose);
+#endif
+
+// The batch vertex transform, which is what a skinning or particle pass
+// actually does. DirectXMath has a dedicated streaming entry point for this;
+// Mathf has no equivalent by design -- the loop IS the entry point -- so this
+// measures whether that design costs anything.
+static void BM_Mathf_TransformPoint_Stream(benchmark::State& state) {
+    const auto& d = StreamData();
+    const mathf::Matrix4x4 world = mathf::Compose(
+        mathf::Vector3{1.5f, 1.5f, 1.5f},
+        mathf::QuaternionFromAxisAngle(mathf::Vector3{0, 1, 0}, 0.7f),
+        mathf::Vector3{3, -4, 5});
+    std::vector<mathf::Vector3> out(kStreamCount);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < kStreamCount; ++i) {
+            out[static_cast<size_t>(i)] =
+                mathf::TransformPoint(d[static_cast<size_t>(i)], world);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kStreamCount);
+}
+BENCHMARK(BM_Mathf_TransformPoint_Stream);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_TransformCoordStream(benchmark::State& state) {
+    const auto& d = StreamData();
+    const mathf::Matrix4x4 world = mathf::Compose(
+        mathf::Vector3{1.5f, 1.5f, 1.5f},
+        mathf::QuaternionFromAxisAngle(mathf::Vector3{0, 1, 0}, 0.7f),
+        mathf::Vector3{3, -4, 5});
+    const DirectX::XMMATRIX xm = DirectX::XMLoadFloat4x4(
+        reinterpret_cast<const DirectX::XMFLOAT4X4*>(&world.m[0][0]));
+    std::vector<DirectX::XMFLOAT3> out(kStreamCount);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        DirectX::XMVector3TransformCoordStream(
+            out.data(), sizeof(DirectX::XMFLOAT3),
+            reinterpret_cast<const DirectX::XMFLOAT3*>(d.data()),
+            sizeof(mathf::Vector3), kStreamCount, xm);
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kStreamCount);
+}
+BENCHMARK(BM_DXMath_TransformCoordStream);
+#endif
+
 BENCHMARK_MAIN();
