@@ -171,6 +171,77 @@ TEST(VectorGeometry, RefractReturnsZeroOnTotalInternalReflection) {
     EXPECT_TRUE(out == Vector3::Zero());
 }
 
+// ------------------------------------------- every width, not just Vector3
+// Vector2 and Vector3 take the scalar path; Vector4 takes the branchless
+// Select-based one. They are separate implementations of the same contract, so
+// testing only Vector3 -- as the first version of this file did -- left
+// NormalizeWide entirely unexercised.
+static_assert(mathf::Normalize(Vector2{3, 4}).x == 0.6f);
+static_assert(mathf::Normalize(Vector4{0, 0, 3, 4}).w == 0.8f);
+static_assert(mathf::Saturate(Vector4{-1, 5, 0.5f, 2}).y == 1.0f);
+static_assert(mathf::Clamp(Vector2{-1, 5}, Vector2::Zero(), Vector2::One()).x == 0.0f);
+static_assert(mathf::Reflect(Vector4{0, -1, 0, 0}, Vector4::UnitY()).y == 1.0f);
+
+TEST(VectorAllWidths, NormalizeProducesUnitLength) {
+    EXPECT_TRUE(mathf::NearEqual(mathf::Normalize(Vector2(3, 4)),
+                                 Vector2(0.6f, 0.8f)));
+    EXPECT_NEAR(mathf::Length(mathf::Normalize(Vector4(1, 2, 3, 4))), 1.0f, 1e-5f);
+    EXPECT_NEAR(mathf::Length(mathf::Normalize(Vector2(-7, 11))), 1.0f, 1e-5f);
+}
+
+// The degenerate contract has to hold on the SIMD path too, not just the scalar
+// one -- Vector4 reaches it through completely different code.
+TEST(VectorAllWidths, NormalizeDegenerateCasesHoldAtEveryWidth) {
+    EXPECT_TRUE(mathf::Normalize(Vector2::Zero()) == Vector2::Zero());
+    EXPECT_TRUE(mathf::Normalize(Vector3::Zero()) == Vector3::Zero());
+    EXPECT_TRUE(mathf::Normalize(Vector4::Zero()) == Vector4::Zero());
+
+    const float inf = std::numeric_limits<float>::infinity();
+    EXPECT_TRUE(std::isnan(mathf::Normalize(Vector2(Opaque(inf), 0.0f)).x));
+    EXPECT_TRUE(std::isnan(mathf::Normalize(Vector4(Opaque(inf), 0, 0, 0)).x));
+}
+
+TEST(VectorAllWidths, NormalizeEstAtEveryWidth) {
+    EXPECT_NEAR(mathf::Length(mathf::NormalizeEst(Vector2(3, 4))), 1.0f, 4e-3f);
+    EXPECT_NEAR(mathf::Length(mathf::NormalizeEst(Vector4(1, 2, 3, 4))), 1.0f, 4e-3f);
+}
+
+TEST(VectorAllWidths, LaneWiseMathAtEveryWidth) {
+    EXPECT_TRUE(mathf::Abs(Vector2(-1, 2)) == Vector2(1, 2));
+    EXPECT_TRUE(mathf::Abs(Vector4(-1, 2, -3, 4)) == Vector4(1, 2, 3, 4));
+
+    EXPECT_TRUE(mathf::Min(Vector2(1, 5), Vector2(4, 2)) == Vector2(1, 2));
+    EXPECT_TRUE(mathf::Max(Vector4(1, 5, 3, 7), Vector4(4, 2, 6, 0)) ==
+                Vector4(4, 5, 6, 7));
+
+    EXPECT_TRUE(mathf::Saturate(Vector4(-1, 5, 0.5f, 2)) == Vector4(0, 1, 0.5f, 1));
+    EXPECT_TRUE(mathf::Clamp(Vector2(-1, 5), Vector2::Zero(), Vector2::One()) ==
+                Vector2(0, 1));
+
+    EXPECT_TRUE(mathf::Lerp(Vector2(0, 0), Vector2(10, 20), 0.5f) == Vector2(5, 10));
+    EXPECT_TRUE(mathf::Lerp(Vector4(0, 0, 0, 0), Vector4(10, 20, 30, 40), 0.5f) ==
+                Vector4(5, 10, 15, 20));
+}
+
+TEST(VectorAllWidths, ReflectAndRefractAtEveryWidth) {
+    EXPECT_TRUE(mathf::NearEqual(mathf::Reflect(Vector2(0, -1), Vector2::UnitY()),
+                                 Vector2(0, 1)));
+    EXPECT_TRUE(mathf::NearEqual(
+        mathf::Reflect(Vector4(0, -1, 0, 0), Vector4::UnitY()),
+        Vector4(0, 1, 0, 0)));
+
+    // Total internal reflection returns zero at every width.
+    const Vector2 shallow = mathf::Normalize(Vector2(1, -0.05f));
+    EXPECT_TRUE(mathf::Refract(shallow, Vector2::UnitY(), 1.5f) == Vector2::Zero());
+}
+
+TEST(VectorAllWidths, NearEqualUsesOnlyItsOwnLanes) {
+    EXPECT_TRUE(mathf::NearEqual(Vector2(1, 2), Vector2(1, 2.000001f)));
+    EXPECT_FALSE(mathf::NearEqual(Vector2(1, 2), Vector2(1, 2.1f)));
+    EXPECT_TRUE(mathf::NearEqual(Vector4(1, 2, 3, 4), Vector4(1, 2, 3, 4.000001f)));
+    EXPECT_FALSE(mathf::NearEqual(Vector4(1, 2, 3, 4), Vector4(1, 2, 3, 4.1f)));
+}
+
 // ---------------------------------------------------------- DirectXMath parity
 #if MATHF_TEST_HAS_DXMATH
 namespace {

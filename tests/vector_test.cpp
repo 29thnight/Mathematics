@@ -112,6 +112,26 @@ static_assert((2.0f * Vector3{1, 2, 3}).z == 6.0f);
 static_assert((Vector3{10, 20, 30} / 2.0f).x == 5.0f);
 static_assert((-Vector3{1, -2, 3}).y == 2.0f);
 
+// Division has to survive constant evaluation at every width. Vector2 and
+// Vector3 load their unused lanes as zero, so dividing by another vector would
+// compute 0/0 in lanes the type does not own -- fine at run time, where the
+// result is discarded, but undefined arithmetic that aborts a constexpr. The
+// divisor's unused lanes are filled with one to prevent it, and these pin that.
+static_assert((Vector2{10, 20} / Vector2{2, 4}).y == 5.0f);
+static_assert((Vector3{10, 20, 30} / Vector3{2, 4, 5}).z == 6.0f);
+static_assert((Vector4{10, 20, 30, 40} / Vector4{2, 4, 5, 8}).w == 5.0f);
+static_assert((Vector2{10, 20} / 2.0f).y == 10.0f);
+static_assert((Vector3{10, 20, 30} / 2.0f).z == 15.0f);
+static_assert((Vector4{10, 20, 30, 40} / 2.0f).w == 20.0f);
+
+// Note for anyone tempted to give operator/(V, float) the same unused-lane
+// guard: it does not need one. Dividing by a zero scalar is rejected during
+// constant evaluation for EVERY width, Vector4 included, because [expr.mul]/4
+// makes division by zero undefined regardless of the operand type -- the lanes
+// the vector actually owns fail first. The guard on operator/(V, V) is needed
+// because there the divisor's used lanes can be nonzero while its unused lanes
+// are zero, which is a case only the narrow types can reach.
+
 TEST(VectorArithmetic, ComponentWiseAgainstHandComputedValues) {
     const Vector4 a{1, 2, 3, 4};
     const Vector4 b{10, 20, 30, 40};

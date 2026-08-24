@@ -172,19 +172,37 @@ NearEqual(V a, V b, float epsilon = 1e-5f) noexcept {
 }
 
 // ------------------------------------------------------------- lane-wise math
+// Same width split as the operators above, and for the same measured reason:
+// each of these is one SIMD instruction wrapped in a full register round trip,
+// which does not pay for itself at two or three components.
 template <VectorLike V>
 MATHF_NODISCARD MATHF_INLINE constexpr V Abs(V a) noexcept {
-    return V::FromReg(Abs(a.Reg()));
+    if constexpr (V::kLanes == 4) return V::FromReg(Abs(a.Reg()));
+    // Sign bit cleared rather than a comparison, so -0.0f gives +0.0f and NaN
+    // payloads survive -- matching what the SIMD path does.
+    else return detail::Componentwise(a, a, [](float p, float) noexcept {
+        return FromBits(BitsOf(p) & kAbsMask);
+    });
 }
 
+// Min and Max follow minps: `a < b ? a : b`, not the equivalent-looking
+// `b < a ? b : a`. The two differ only when an operand is NaN, and writing it
+// the other way is how the backend's own transposed version slipped through
+// (docs/PLAN.md Phase 1 rule 3).
 template <VectorLike V>
 MATHF_NODISCARD MATHF_INLINE constexpr V Min(V a, V b) noexcept {
-    return V::FromReg(Min(a.Reg(), b.Reg()));
+    if constexpr (V::kLanes == 4) return V::FromReg(Min(a.Reg(), b.Reg()));
+    else return detail::Componentwise(a, b, [](float p, float q) noexcept {
+        return p < q ? p : q;
+    });
 }
 
 template <VectorLike V>
 MATHF_NODISCARD MATHF_INLINE constexpr V Max(V a, V b) noexcept {
-    return V::FromReg(Max(a.Reg(), b.Reg()));
+    if constexpr (V::kLanes == 4) return V::FromReg(Max(a.Reg(), b.Reg()));
+    else return detail::Componentwise(a, b, [](float p, float q) noexcept {
+        return p > q ? p : q;
+    });
 }
 
 template <VectorLike V>
@@ -194,15 +212,19 @@ MATHF_NODISCARD MATHF_INLINE constexpr V Clamp(V v, V lo, V hi) noexcept {
 
 template <VectorLike V>
 MATHF_NODISCARD MATHF_INLINE constexpr V Saturate(V v) noexcept {
-    return V::FromReg(Min(Max(v.Reg(), Zero()), Splat(1.0f)));
+    return Clamp(v, V{}, V{1.0f});
 }
 
 // (1 - t) * a + t * b, evaluated as a + t * (b - a): one fused multiply-add, and
 // exact at t == 0 and t == 1.
 template <VectorLike V>
 MATHF_NODISCARD MATHF_INLINE constexpr V Lerp(V a, V b, float t) noexcept {
-    const VecReg ra = a.Reg();
-    return V::FromReg(MulAdd(Sub(b.Reg(), ra), Splat(t), ra));
+    if constexpr (V::kLanes == 4) {
+        const VecReg ra = a.Reg();
+        return V::FromReg(MulAdd(Sub(b.Reg(), ra), Splat(t), ra));
+    } else {
+        return a + (b - a) * t;
+    }
 }
 
 // ------------------------------------------------------------------ geometry
