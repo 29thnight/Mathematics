@@ -67,9 +67,9 @@ MATHF_NODISCARD MATHF_INLINE constexpr float FromBits(std::uint32_t bits) noexce
 // but are not constant-evaluable -- and serving the compile-time path is the
 // entire reason these exist.
 //
-// NOT VERIFIED ON MSVC/ARM64: no ARM toolchain was available when this was
-// written, so the __n128 branch rests on documented layout and is first
-// exercised by CI.
+// The __n128 branch (MSVC targeting ARM64) is still unverified: no CI leg builds
+// that combination, and it rests on MSVC's documented layout. Every other branch
+// here is covered.
 // The four lanes as a plain array. Used only to reinterpret a register during
 // constant evaluation on Clang and GCC, where subscripting a native vector type
 // is not a constant expression -- Clang rejects it outright with

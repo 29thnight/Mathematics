@@ -1,8 +1,10 @@
 // mathf/arch/simd_neon.hpp — AArch64 NEON backend.
 //
-// NOT VERIFIED LOCALLY. No ARM toolchain was available while this was written,
-// so CI is the first thing to compile or run it. Correctness is favoured over
-// instruction count throughout; the places worth tuning are marked.
+// Verified by CI on AArch64 Linux (GCC and Clang), which is also the only place
+// it is exercised -- no ARM toolchain is available locally. The MSVC/ARM64 path
+// through __n128 remains unverified: no CI leg builds it. Correctness is
+// favoured over instruction count throughout; the places worth tuning are
+// marked.
 //
 // Targets AArch64, which is what _M_ARM64, _M_ARM64EC and __aarch64__ select.
 // Several intrinsics used here (vdivq_f32, vsqrtq_f32, vaddvq_f32) do not exist

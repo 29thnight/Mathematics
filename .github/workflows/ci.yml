@@ -88,12 +88,23 @@ jobs:
   # ARM64/NEON coverage. The SSE and NEON backends are separate code paths, so
   # without this the NEON path would ship untested.
   linux-arm64:
-    name: Linux ARM64 (NEON)
+    name: Linux ARM64 NEON ${{ matrix.cc }}
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build

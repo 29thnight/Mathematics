@@ -250,7 +250,8 @@ GLM과 Sony Vectormath는 부가 비교 대상이며 게이트에 포함하지 �
 - [x] `arch/consteval_ops.hpp` — **모든 연산의 의미를 한 번만 정의.** 각 백엔드의
       constexpr 분기이자 스칼라 폴백이자 테스트 오라클로 동시에 쓰인다
 - [x] `arch/simd_sse.hpp` (SSE2 기준, SSE4.1 dpps / FMA 조건부)
-- [x] `arch/simd_neon.hpp` (CI 검증 전용 — 로컬 ARM 툴체인 없음)
+- [x] `arch/simd_neon.hpp` — CI에서 AArch64 Linux(GCC·Clang) 검증 완료.
+      MSVC/ARM64(`__n128`) 경로만 아직 미검증
 - [x] `arch/simd_scalar.hpp`, `arch/simd_select.hpp`
 - [x] 연산 45종: 산술·비교·비트·Select·셔플·수평·적재/저장·술어
 - [x] 테스트 48개 (3중 검증: constexpr / consteval_ops / DirectXMath)
@@ -268,6 +269,11 @@ GLM과 Sony Vectormath는 부가 비교 대상이며 게이트에 포함하지 �
    NaN 테스트에서 잡혔다.
 4. 내적 비교의 허용오차는 **결과가 아니라 항들의 크기**에 비례해야 한다. 상쇄가
    일어나면 결과 기준 상대 오차는 무의미해진다.
+5. **컴파일 타임 레인 접근은 컴파일러마다 제약이 정반대다.** MSVC는 인트린식 타입이
+   union이라 멤버를 직접 쓸 수 있지만 `std::bit_cast`가 막힌다(union 멤버 포함).
+   Clang·GCC는 네이티브 벡터 타입이라 첨자 접근이 상수 표현식이 아니지만
+   `bit_cast`는 된다. 두 제약이 정확히 상보적이라 백엔드별로 갈라 쓴다.
+   로컬 clang은 첨자 접근을 허용해서 CI 전까지 드러나지 않았다.
 
 ### Phase 2 — 벡터 타입
 - [ ] `Float2/3/4` 저장 타입, `Vec2/3/4` 편의 타입
