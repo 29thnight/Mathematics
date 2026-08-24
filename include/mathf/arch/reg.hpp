@@ -82,17 +82,26 @@ MATHF_NODISCARD MATHF_INLINE constexpr float Lane(const VecReg& r, int i) noexce
 #endif
 }
 
-MATHF_INLINE constexpr void SetLane(VecReg& r, int i, float x) noexcept {
+namespace detail {
+
+// Writes a lane in place. Valid during constant evaluation only on MSVC, where
+// the intrinsic types are unions: GCC -- and some Clang versions -- reject
+// assignment to an element of a native vector type in a constant expression.
+// The portable compile-time path is MakeReg, which builds the whole register at
+// once; this helper exists for MakeReg's own MSVC branch and for runtime writes.
+MATHF_INLINE constexpr void WriteLane(RegNative& v, int i, float x) noexcept {
 #if MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_SSE
-    r.v.m128_f32[i] = x;
+    v.m128_f32[i] = x;
 #elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
-    r.v.n128_f32[i] = x;
+    v.n128_f32[i] = x;
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
-    r.v[i] = x;
+    v[i] = x;
 #else
-    r.v.f[i] = x;
+    v.f[i] = x;
 #endif
 }
+
+} // namespace detail
 
 MATHF_NODISCARD MATHF_INLINE constexpr std::uint32_t
 LaneBits(const VecReg& r, int i) noexcept {
@@ -117,23 +126,47 @@ LaneBits(const VecReg& r, int i) noexcept {
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg
 MakeReg(float x, float y, float z, float w) noexcept {
     MATHF_IF_CONSTEVAL {
+        // The compile-time form is per-compiler because the register type is:
+        // MSVC's intrinsic types are unions whose float member can be written
+        // lane by lane, while Clang's and GCC's are native vector types that
+        // must be initialized whole -- GCC rejects element assignment on one
+        // during constant evaluation outright, and Clang does depending on
+        // version. Both were caught by CI, having passed locally.
+#if MATHF_MSVC_INTRINSIC_UNION
         VecReg r{};
-        SetLane(r, 0, x);
-        SetLane(r, 1, y);
-        SetLane(r, 2, z);
-        SetLane(r, 3, w);
+        detail::WriteLane(r.v, 0, x);
+        detail::WriteLane(r.v, 1, y);
+        detail::WriteLane(r.v, 2, z);
+        detail::WriteLane(r.v, 3, w);
         return r;
+#elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
+        return VecReg{RegNative{x, y, z, w}};
+#else
+        return VecReg{RegNative{{x, y, z, w}}};
+#endif
     }
 #if MATHF_SIMD_SSE
     return VecReg{_mm_setr_ps(x, y, z, w)};   // setr takes lanes in order
 #elif MATHF_SIMD_NEON
-    // Loaded rather than brace-initializing float32x4_t: the vector-literal form
-    // is a compiler extension GCC and Clang do not spell identically.
+    // Loaded rather than brace-initializing float32x4_t: vld1q_f32 is plain
+    // ACLE, where the vector-literal form is a compiler extension.
     const float lanes[4] = {x, y, z, w};
     return VecReg{vld1q_f32(lanes)};
 #else
     return VecReg{RegNative{{x, y, z, w}}};
 #endif
+}
+
+// Writing a single lane during constant evaluation goes through MakeReg, which
+// is the only portable way to build a register (see the note above). At runtime
+// the direct write is used.
+MATHF_INLINE constexpr void SetLane(VecReg& r, int i, float x) noexcept {
+    MATHF_IF_CONSTEVAL {
+        r = MakeReg(i == 0 ? x : Lane(r, 0), i == 1 ? x : Lane(r, 1),
+                    i == 2 ? x : Lane(r, 2), i == 3 ? x : Lane(r, 3));
+        return;
+    }
+    detail::WriteLane(r.v, i, x);
 }
 
 MATHF_NODISCARD MATHF_INLINE constexpr VecReg
