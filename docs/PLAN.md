@@ -237,12 +237,29 @@ DXMath 대응 함수와 1:1 벤치마크로 직접 비교하며, 이는 선택 �
    가드해야 한다. 아니면 연산이 아니라 비정규수 스톨을 측정하게 된다.
 5. `Dot`은 SSE4.1 `dpps` 경로 필수 — 없으면 DXMath에 진다.
 
-### Phase 1 — SIMD 백엔드 + VecReg
-- [ ] `arch/simd_scalar.hpp` (TDD: 참조 구현이자 폴백)
-- [ ] `arch/simd_sse.hpp` (SSE2 기준, SSE4.1 dot/FMA 조건부)
-- [ ] `arch/simd_neon.hpp`
-- [ ] `vec_reg.hpp`: load/store/shuffle/산술/비교/수평 연산
-- 완료 기준: 백엔드 3종 테스트 통과 + vec4 add/dot 벤치가 DXMath 동급
+### Phase 1 — SIMD 백엔드 + VecReg — **완료 (2026-08-24)**
+- [x] `arch/reg.hpp` — `VecReg`, 레인 접근, 비트 헬퍼
+- [x] `arch/consteval_ops.hpp` — **모든 연산의 의미를 한 번만 정의.** 각 백엔드의
+      constexpr 분기이자 스칼라 폴백이자 테스트 오라클로 동시에 쓰인다
+- [x] `arch/simd_sse.hpp` (SSE2 기준, SSE4.1 dpps / FMA 조건부)
+- [x] `arch/simd_neon.hpp` (CI 검증 전용 — 로컬 ARM 툴체인 없음)
+- [x] `arch/simd_scalar.hpp`, `arch/simd_select.hpp`
+- [x] 연산 45종: 산술·비교·비트·Select·셔플·수평·적재/저장·술어
+- [x] 테스트 48개 (3중 검증: constexpr / consteval_ops / DirectXMath)
+- [x] 벤치 5종 전부 DXMath ±1% 이내 ([BASELINE.md](BASELINE.md))
+
+**Phase 1에서 얻은 규칙**
+1. **MSVC에서 C++23 `if consteval`은 성능 필수 조건이다.** C++20 대체 구현은
+   죽은 컴파일 타임 분기의 union 접근 때문에 런타임 표현을 오염시켜 최대 2.2배
+   느려진다. 빌드는 C++23을 자동 감지해 사용하고, 안 되면 헤더가 경고한다.
+   상세: [SPIKE-RESULTS.md §6](SPIKE-RESULTS.md)
+2. 백엔드 간 의미가 갈리는 지점(`Min`/`Max`의 NaN)은 통일하지 않고 **명시적으로
+   테스트에 고정**한다. DXMath도 같은 선택을 한다.
+3. `minps(a,b)`는 `a < b ? a : b`다. 동등해 보이는 `b < a ? b : a`로 쓰면 NaN에서만
+   갈라지며, 랜덤 입력 패리티는 통과한다 — 실제로 그렇게 놓쳤다가 스칼라 빌드의
+   NaN 테스트에서 잡혔다.
+4. 내적 비교의 허용오차는 **결과가 아니라 항들의 크기**에 비례해야 한다. 상쇄가
+   일어나면 결과 기준 상대 오차는 무의미해진다.
 
 ### Phase 2 — 벡터 타입
 - [ ] `Float2/3/4` 저장 타입, `Vec2/3/4` 편의 타입
@@ -288,10 +305,11 @@ DXMath 대응 함수와 1:1 벤치마크로 직접 비교하며, 이는 선택 �
 |------|------|------|
 | 테스트 프레임워크 | GoogleTest | 확정 (Phase 0 적용) |
 | 벤치마크 | Google Benchmark | 확정 (Phase 0 적용) |
-| 행렬 관례 | row-major / row-vector (DXMath 동일) | **Phase 3 착수 전 최종 확인 필요** |
+| 행렬 관례 | row-major / row-vector (DXMath 동일) | **확정 (2026-08-24)** |
 | 저장소 | git 초기화 완료 | 확정 |
 | `VecReg` 저장 전략 | `struct { __m128 v; }` (스파이크 전략 A) | 확정 (실측 근거) |
 | double 지원 | 1차 릴리스 제외 | 확정 |
 
-> 행렬 관례만 아직 되돌릴 수 있는 시점이다. Phase 3(행렬)에 들어가면 변경 비용이
-> 급격히 커지므로, 그 전에 한 번 더 확인한다.
+> 모든 항목이 확정되었다. 행렬은 **DirectXMath 관례**를 따른다 —
+> row-major 저장, row-vector 곱(`v * M`), 변환 합성은 왼쪽에서 오른쪽으로 읽는다.
+> 이에 따라 Phase 3의 골든 테스트는 DXMath 결과와 직접 대조할 수 있다.

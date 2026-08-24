@@ -73,4 +73,5 @@ function(mathf_fetch_glm)
         GIT_TAG        1.0.1
         GIT_SHALLOW    TRUE)
     FetchContent_MakeAvailable(glm)
+    mathf_group_third_party(glm)
 endfunction()

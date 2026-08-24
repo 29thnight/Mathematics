@@ -5,9 +5,22 @@ project(Mathf
     DESCRIPTION "Modern C++20/23 game math library with DirectXMath-class performance"
     LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+# C++20 is the language floor, but our own targets build as C++23 wherever the
+# compiler offers it, because `if consteval` is worth real performance on MSVC.
+# Under C++20 MSVC falls back to `if (std::is_constant_evaluated())`, and the
+# dead compile-time branch -- which reads __m128's float[4] union member -- makes
+# it represent the whole object as four scalars, rebuilding and tearing apart the
+# vector around every operation. Measured at 1.9x slower than DirectXMath on a
+# MulAdd chain; `if consteval` removes it entirely. Clang is unaffected either
+# way. See docs/SPIKE-RESULTS.md.
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(cxx_std_23 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+    set(CMAKE_CXX_STANDARD 23)
+else()
+    set(CMAKE_CXX_STANDARD 20)
+endif()
 
 # Treat Mathf as top-level only when built directly, so add_subdirectory() users
 # do not inherit our tests, benchmarks, or warning policy.

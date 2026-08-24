@@ -1,9 +1,13 @@
-# Phase 0 성능 기준선
+# 성능 기준선
 
-측정일: 2026-08-24
+측정일: 2026-08-24 (Phase 1 기준으로 갱신)
 CPU: Intel Core i7-8700K @ 3.70GHz (6C/12T, Coffee Lake)
-컴파일러: MSVC 14.51.36231 / `/O2 /arch:AVX2 /fp:fast`
+컴파일러: MSVC 14.51.36231 / **C++23** / `/O2 /arch:AVX2 /fp:fast`
 설정: `--benchmark_min_time=0.5s --benchmark_repetitions=5`
+
+> **표준 표기는 필수 정보다.** MSVC에서 C++20으로 빌드하면 아래 수치의 약 2배까지
+> 느려진다 — `if consteval`이 없으면 컴파일 타임 분기가 런타임 표현을 오염시킨다
+> ([SPIKE-RESULTS.md §6](SPIKE-RESULTS.md)). Clang은 두 표준 모두 동일하다.
 
 > 이 문서는 **DXMath가 어디에 있는지**를 고정하는 기준점이다.
 > 이후 모든 Phase는 여기에 기록된 DXMath 수치 대비 ±5% 이내를 유지해야 한다
@@ -17,8 +21,11 @@ CPU: Intel Core i7-8700K @ 3.70GHz (6C/12T, Coffee Lake)
 
 | 연산 | Mathf | DirectXMath | 차이 | 판정 |
 |------|-------|-------------|------|------|
-| MulAdd | 2.14 ns | 2.14 ns | 0.0% | PASS |
-| Dot4 | 4.25 ns | 4.25 ns | 0.0% | PASS |
+| Add | 2.18 ns | 2.16 ns | +0.9% | PASS |
+| MulAdd | 2.13 ns | 2.12 ns | +0.5% | PASS |
+| Sqrt | 4.00 ns | 4.02 ns | −0.5% | PASS |
+| Dot3 | 4.26 ns | 4.24 ns | +0.5% | PASS |
+| Dot4 | 4.23 ns | 4.23 ns | 0.0% | PASS |
 
 측정 변동(cv)은 모두 1% 미만으로 안정적이다.
 **어셈블리가 동일하므로(SPIKE-RESULTS.md §2) 수치가 같은 것은 예상된 결과이며,

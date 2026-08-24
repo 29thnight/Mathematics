@@ -14,6 +14,7 @@
 #include <benchmark/benchmark.h>
 
 #include <array>
+#include <cmath>
 #include <random>
 #include <vector>
 
@@ -86,6 +87,100 @@ static void BM_DXMath_MulAdd_Latency(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_DXMath_MulAdd_Latency);
+#endif
+
+// =============================================================== latency: Add
+// Adding 1.0 rather than 0.0: fast-math is allowed to fold x + 0 away entirely,
+// which would leave the loop measuring nothing. The accumulator climbs to 2^24
+// and then stops changing, because 1.0 falls below the ULP there -- bounded, and
+// the instruction still issues every iteration.
+static void BM_Mathf_Add_Latency(benchmark::State& state) {
+    mathf::VecReg acc = mathf::Splat(1.0f);
+    const mathf::VecReg b = mathf::Splat(1.0f);
+    for (auto _ : state) {
+        acc = mathf::Add(acc, b);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (!std::isfinite(mathf::GetX(acc))) {
+        state.SkipWithError("accumulator left the finite range");
+    }
+}
+BENCHMARK(BM_Mathf_Add_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Add_Latency(benchmark::State& state) {
+    DirectX::XMVECTOR acc = DirectX::XMVectorReplicate(1.0f);
+    const DirectX::XMVECTOR b = DirectX::XMVectorReplicate(1.0f);
+    for (auto _ : state) {
+        acc = DirectX::XMVectorAdd(acc, b);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (!std::isfinite(DirectX::XMVectorGetX(acc))) {
+        state.SkipWithError("accumulator left the finite range");
+    }
+}
+BENCHMARK(BM_DXMath_Add_Latency);
+#endif
+
+// =============================================================== latency: Sqrt
+// Repeated square roots converge to 1.0 from any positive start, so this chain
+// is self-stabilising and needs no tuned constant.
+static void BM_Mathf_Sqrt_Latency(benchmark::State& state) {
+    mathf::VecReg acc = mathf::Splat(16.0f);
+    for (auto _ : state) {
+        acc = mathf::Sqrt(acc);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+}
+BENCHMARK(BM_Mathf_Sqrt_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Sqrt_Latency(benchmark::State& state) {
+    DirectX::XMVECTOR acc = DirectX::XMVectorReplicate(16.0f);
+    for (auto _ : state) {
+        acc = DirectX::XMVectorSqrt(acc);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+}
+BENCHMARK(BM_DXMath_Sqrt_Latency);
+#endif
+
+// =============================================================== latency: Dot3
+// Dot3 splats the sum of three lanes, so a self-feeding chain multiplies the
+// accumulator by sum(b.xyz) each step; 1/3 in each lane holds it at 1.0. Same
+// reasoning as Dot4 below.
+static void BM_Mathf_Dot3_Latency(benchmark::State& state) {
+    mathf::VecReg acc = mathf::Splat(1.0f);
+    const mathf::VecReg b = mathf::Splat(1.0f / 3.0f);
+    for (auto _ : state) {
+        acc = mathf::Dot3(acc, b);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (mathf::GetX(acc) < 0.5f || mathf::GetX(acc) > 2.0f) {
+        state.SkipWithError("accumulator drifted; latency measurement invalid");
+    }
+}
+BENCHMARK(BM_Mathf_Dot3_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Dot3_Latency(benchmark::State& state) {
+    DirectX::XMVECTOR acc = DirectX::XMVectorReplicate(1.0f);
+    const DirectX::XMVECTOR b = DirectX::XMVectorReplicate(1.0f / 3.0f);
+    for (auto _ : state) {
+        acc = DirectX::XMVector3Dot(acc, b);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (DirectX::XMVectorGetX(acc) < 0.5f || DirectX::XMVectorGetX(acc) > 2.0f) {
+        state.SkipWithError("accumulator drifted; latency measurement invalid");
+    }
+}
+BENCHMARK(BM_DXMath_Dot3_Latency);
 #endif
 
 // ================================================================ latency: Dot4

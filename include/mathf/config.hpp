@@ -161,10 +161,24 @@
 // ---------------------------------------------------------------- attributes
 #define MATHF_NODISCARD [[nodiscard]]
 
+// Prefer C++23's `if consteval`. On MSVC this is a performance feature, not a
+// spelling preference: with the C++20 fallback the compile-time branch is still
+// analyzed, and because it reads __m128's float[4] union member, MSVC represents
+// the whole object as four scalars from then on -- rebuilding the vector with
+// vinsertps before each operation and tearing it apart with vshufps after.
+// Measured at 1.9x slower than DirectXMath on a MulAdd chain, and 2.2x on Dot3.
+// Clang and GCC are unaffected. See docs/SPIKE-RESULTS.md.
 #if MATHF_HAS_IF_CONSTEVAL
 #  define MATHF_IF_CONSTEVAL if consteval
 #else
 #  define MATHF_IF_CONSTEVAL if (std::is_constant_evaluated())
+#  if MATHF_MSVC_INTRINSIC_UNION && !defined(MATHF_NO_PERF_WARNINGS)
+#    pragma message(                                                           \
+        "Mathf: building as C++20 on MSVC. Reading a lane (GetX, Lane, ...) "  \
+        "from a vector that outlives the read costs roughly 2x on this "       \
+        "configuration; compiling as C++23 removes it. Define "                \
+        "MATHF_NO_PERF_WARNINGS to silence this.")
+#  endif
 #endif
 
 // ---------------------------------------------------------------- diagnostics

@@ -13,7 +13,7 @@ setlocal
 call "%~dp0find_vs.bat" || exit /b 1
 
 set "PATH=%VSINSTALL%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%PATH%"
-set "SLN=%LOCALAPPDATA%\MathfBuild\vs2026\Mathf.sln"
+set "SLNDIR=%LOCALAPPDATA%\MathfBuild\vs2026"
 
 pushd "%~dp0.."
 
@@ -22,14 +22,24 @@ cmake --preset vs2026 || goto :fail
 
 popd
 
-if /i "%~1"=="--no-open" (
+REM The VS 2026 generator writes the XML solution format (.slnx); older
+REM generators write the classic .sln. Accept whichever is there.
+set "SLN="
+if exist "%SLNDIR%\Mathf.slnx" set "SLN=%SLNDIR%\Mathf.slnx"
+if not defined SLN if exist "%SLNDIR%\Mathf.sln" set "SLN=%SLNDIR%\Mathf.sln"
+
+if not defined SLN (
     echo.
-    echo SOLUTION: %SLN%
-    exit /b 0
+    echo ERROR: no solution file under %SLNDIR% after a successful generate.
+    exit /b 1
 )
 
 echo.
-echo === opening %SLN% ===
+echo SOLUTION: %SLN%
+
+if /i "%~1"=="--no-open" exit /b 0
+
+echo === opening in Visual Studio ===
 start "" "%VSINSTALL%\Common7\IDE\devenv.exe" "%SLN%"
 exit /b 0
 
