@@ -275,10 +275,67 @@ GLM과 Sony Vectormath는 부가 비교 대상이며 게이트에 포함하지 �
    `bit_cast`는 된다. 두 제약이 정확히 상보적이라 백엔드별로 갈라 쓴다.
    로컬 clang은 첨자 접근을 허용해서 CI 전까지 드러나지 않았다.
 
-### Phase 2 — 벡터 타입
-- [ ] `Float2/3/4` 저장 타입, `Vec2/3/4` 편의 타입
-- [ ] dot/cross/length/normalize(+Est)/lerp/reflect/refract/clamp/min/max
-- 완료 기준: 전 연산 스칼라 패리티 + constexpr 패리티 + 벤치 합격
+### Phase 2 — 벡터 타입 — **완료 (2026-08-24)**
+- [x] `Vector2/3/4` — 사용자 대면 타입 (패킹 8/12/16바이트, 표준 레이아웃)
+- [x] `vector_common.hpp` — 세 타입이 공유하는 연산을 concept 제약 템플릿으로 1회 정의
+- [x] 산술·비교·Abs/Min/Max/Clamp/Saturate/Lerp·Dot/Length/Distance·
+      Normalize(+Est)·Reflect/Refract·Cross(3D 벡터, 2D 스칼라)·Perpendicular
+- [x] 테스트 37개 추가 (총 85개) — constexpr·손계산·DirectXMath 3중 검증
+- [x] 벤치 검증: `Vector3` 연쇄가 DXMath `XMVECTOR`와 동일, Normalize는 32% 우위
+
+**Phase 2에서 얻은 규칙**
+1. **폭이 좁으면 SIMD 승격이 손해다.** 2·3성분 레인별 연산은 스칼라가 빠르다
+   (pack 1 + extract 3 > SIMD 1회 이득). 4성분과 축약 연산(Dot/Length/Cross)은 SIMD.
+2. **미사용 레인이 0이면 벡터 나눗셈이 constexpr에서 막힌다.** `Vector3` 나눗셈은
+   w 레인에서 0/0이 되는데, 런타임에는 버려지는 NaN이지만 상수 평가에서는 정의되지
+   않은 연산이라 컴파일이 중단된다. 제수의 미사용 레인을 1로 채워 해결했다.
+   `Select`는 분기가 아니라 블렌드라 양쪽이 모두 계산된다는 점도 같은 함정
+   (`Normalize`의 0 길이 나눗셈)을 만든다.
+3. **constexpr용 스칼라 구현을 런타임에 부르지 않도록 주의.**
+   `consteval_ops::SqrtScalar`는 뉴턴법이라 런타임에 4.6배 느리다.
+
+**명명**: `Vector2/3/4` (초안의 `Vec2/3/4`에서 변경). DirectXMath의 `XMFLOAT3`보다
+SimpleMath의 `Vector3`에 가까운 이름이 사용자에게 익숙하다.
+
+**저장 방식 결정: 패킹된 저장 + 연산자** (레지스터 래핑이 아님)
+
+`Vector3`는 `float x, y, z`를 직접 갖는 표준 레이아웃 타입이다. 레지스터 래핑도
+검토했으나 두 가지가 결정적이었다:
+1. `v.x`로 멤버에 직접 접근할 수 있어야 한다. 레지스터 기반이면 `v.GetX()`가 되고,
+   이는 DXMath가 `XMVectorGetX`로 겪는 바로 그 불편함이다.
+2. 구조체 멤버·정점 버퍼에 그대로 들어가야 한다. 12바이트 패킹이어야 하며,
+   16바이트 정렬 레지스터로는 불가능하다.
+
+**연산 방식: 폭에 따라 갈라진다 — 이건 측정 결과지 설계 취향이 아니다.**
+
+처음 가정은 "모든 연산을 `VecReg`로 승격하고, 강제 인라인이 load/store를 접어줄
+것"이었다. **틀렸다.** 연쇄 표현식 `a * b + c`를 측정하니:
+
+| | 지연 |
+|---|---|
+| Mathf `Vector3` (전부 SIMD 승격) | 5.25 ns |
+| DXMath `XMFLOAT3` (매 단계 load/store) | 5.53 ns |
+| DXMath `XMVECTOR` (레지스터 상주) | **2.24 ns** |
+| GLM `vec3` (스칼라) | 3.21 ns |
+
+승격 방식은 `XMFLOAT3`와 같은 급이었고 레지스터 형태보다 2.3배 느렸다. GLM의 스칼라
+`vec3`에도 졌다. **3성분에서는 pack 1회 + extract 3회 비용이 SIMD 1회 연산의 이득을
+넘어선다.**
+
+그래서 폭에 따라 나눴다:
+- **`Vector2`·`Vector3`의 레인별 산술과 `Normalize`: 스칼라.** 성분들이 서로 독립적인
+  의존 사슬을 이루므로 파이프라이닝되어, 결과적으로 SIMD 1회와 같은 지연이 된다.
+- **`Vector4`: SIMD.** 4레인이 다 차고 16바이트 적재/저장이 한 번에 되므로 승격이 이득.
+- **`Dot`·`Length`·`Cross`: 폭과 무관하게 SIMD.** 왕복당 작업량이 충분히 크다.
+
+결과: `Vector3` 연쇄 **2.28 ns — DXMath의 레지스터 상주 `XMVECTOR`와 정확히 동일**하다.
+12바이트 패킹을 유지하면서 레지스터 타입의 성능을 낸다.
+
+> **함정 기록**: 스칼라 `Normalize`를 처음 넣었을 때 4.6배 느려졌다.
+> `consteval_ops::SqrtScalar`(constexpr용 뉴턴법)가 런타임에 돌고 있었기 때문이다.
+> 런타임 경로는 반드시 `std::sqrt`로 가야 한다.
+
+핫 루프에서 함수 경계를 넘나드는 코드는 여전히 `VecReg`를 직접 쓴다.
 
 ### Phase 3 — 행렬
 - [ ] `Mat4` (mul/transpose/inverse/determinant), `Mat3`

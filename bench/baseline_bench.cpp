@@ -10,6 +10,7 @@
 // every mapped operation. Run with --benchmark_repetitions=5 for stable numbers.
 
 #include <mathf/vec_reg.hpp>
+#include <mathf/vector.hpp>
 
 #include <benchmark/benchmark.h>
 
@@ -373,6 +374,153 @@ static void BM_Vectormath_Dot4Scalar_Latency(benchmark::State& state) {
     if (acc < 0.5f || acc > 2.0f) state.SkipWithError("accumulator drifted");
 }
 BENCHMARK(BM_Vectormath_Dot4Scalar_Latency);
+#endif
+
+// ================================================ latency: Vector3 expression
+// The decisive test for Phase 2's storage decision (docs/PLAN.md).
+//
+// Mathf's Vector3 is twelve packed bytes, so `a * b + c` promotes to a register,
+// computes, and stores back on every step. That is only free if force-inlining
+// lets the compiler keep the value in a register between steps -- which is the
+// assumption the design rests on, and the reason for measuring rather than
+// asserting it.
+//
+// Three variants make the answer readable:
+//   Mathf Vector3   packed storage, operations promote and store
+//   DXMath XMVECTOR the register held across the whole loop -- the ceiling
+//   DXMath XMFLOAT3 load and store every step -- what Vector3 literally does,
+//                   and what SimpleMath pays
+// Matching XMVECTOR means the stores fold away. Matching only XMFLOAT3 means
+// they do not, and the design should change.
+static void BM_Mathf_Vector3_Chain_Latency(benchmark::State& state) {
+    mathf::Vector3 acc{1.0f, 1.0f, 1.0f};
+    const mathf::Vector3 b{kMulAddStableB, kMulAddStableB, kMulAddStableB};
+    const mathf::Vector3 c{kMulAddStableC, kMulAddStableC, kMulAddStableC};
+    for (auto _ : state) {
+        acc = acc * b + c;
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (acc.x < 0.5f || acc.x > 2.0f) state.SkipWithError("accumulator drifted");
+}
+BENCHMARK(BM_Mathf_Vector3_Chain_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_XMVECTOR_Chain_Latency(benchmark::State& state) {
+    DirectX::XMVECTOR acc = DirectX::XMVectorReplicate(1.0f);
+    const DirectX::XMVECTOR b = DirectX::XMVectorReplicate(kMulAddStableB);
+    const DirectX::XMVECTOR c = DirectX::XMVectorReplicate(kMulAddStableC);
+    for (auto _ : state) {
+        acc = DirectX::XMVectorMultiplyAdd(acc, b, c);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    const float x = DirectX::XMVectorGetX(acc);
+    if (x < 0.5f || x > 2.0f) state.SkipWithError("accumulator drifted");
+}
+BENCHMARK(BM_DXMath_XMVECTOR_Chain_Latency);
+
+static void BM_DXMath_XMFLOAT3_Chain_Latency(benchmark::State& state) {
+    DirectX::XMFLOAT3 acc{1.0f, 1.0f, 1.0f};
+    const DirectX::XMVECTOR b = DirectX::XMVectorReplicate(kMulAddStableB);
+    const DirectX::XMVECTOR c = DirectX::XMVectorReplicate(kMulAddStableC);
+    for (auto _ : state) {
+        DirectX::XMStoreFloat3(
+            &acc, DirectX::XMVectorMultiplyAdd(DirectX::XMLoadFloat3(&acc), b, c));
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (acc.x < 0.5f || acc.x > 2.0f) state.SkipWithError("accumulator drifted");
+}
+BENCHMARK(BM_DXMath_XMFLOAT3_Chain_Latency);
+#endif
+
+#if MATHF_BENCH_HAS_GLM
+static void BM_GLM_Vector3_Chain_Latency(benchmark::State& state) {
+    glm::vec3 acc(1.0f);
+    const glm::vec3 b(kMulAddStableB);
+    const glm::vec3 c(kMulAddStableC);
+    for (auto _ : state) {
+        acc = acc * b + c;
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (acc.x < 0.5f || acc.x > 2.0f) state.SkipWithError("accumulator drifted");
+}
+BENCHMARK(BM_GLM_Vector3_Chain_Latency);
+#endif
+
+// ========================================== throughput: Vector3 normalize
+// A realistic stream: read a packed twelve-byte position array, normalize, write
+// it back. This is where Vector3's packing earns its keep -- there is no padding
+// to skip and no conversion pass.
+namespace {
+
+constexpr int kVec3Batch = 512;
+
+const std::vector<mathf::Vector3>& Vector3Data() {
+    static const std::vector<mathf::Vector3> data = [] {
+        std::mt19937 rng(kSeed);
+        std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
+        std::vector<mathf::Vector3> out(kVec3Batch);
+        for (auto& v : out) v = mathf::Vector3{dist(rng), dist(rng), dist(rng)};
+        return out;
+    }();
+    return data;
+}
+
+} // namespace
+
+static void BM_Mathf_Vector3_Normalize_Throughput(benchmark::State& state) {
+    const auto& in = Vector3Data();
+    std::vector<mathf::Vector3> out(kVec3Batch);
+    for (auto _ : state) {
+        for (int i = 0; i < kVec3Batch; ++i) {
+            out[static_cast<size_t>(i)] = mathf::Normalize(in[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kVec3Batch);
+}
+BENCHMARK(BM_Mathf_Vector3_Normalize_Throughput);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Vector3_Normalize_Throughput(benchmark::State& state) {
+    const auto& in = Vector3Data();
+    std::vector<DirectX::XMFLOAT3> out(kVec3Batch);
+    for (auto _ : state) {
+        for (int i = 0; i < kVec3Batch; ++i) {
+            const auto* q =
+                reinterpret_cast<const DirectX::XMFLOAT3*>(&in[static_cast<size_t>(i)].x);
+            DirectX::XMStoreFloat3(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(q)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kVec3Batch);
+}
+BENCHMARK(BM_DXMath_Vector3_Normalize_Throughput);
+#endif
+
+#if MATHF_BENCH_HAS_GLM
+static void BM_GLM_Vector3_Normalize_Throughput(benchmark::State& state) {
+    const auto& in = Vector3Data();
+    std::vector<glm::vec3> out(kVec3Batch);
+    for (auto _ : state) {
+        for (int i = 0; i < kVec3Batch; ++i) {
+            const auto& v = *reinterpret_cast<const glm::vec3*>(
+                &in[static_cast<size_t>(i)].x);
+            out[static_cast<size_t>(i)] = glm::normalize(v);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kVec3Batch);
+}
+BENCHMARK(BM_GLM_Vector3_Normalize_Throughput);
 #endif
 
 // ========================================================== throughput: MulAdd
