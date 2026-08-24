@@ -245,6 +245,39 @@ TEST(MatrixInverse, SingularReturnsIdentity) {
                 Matrix3x3::Identity());
 }
 
+// Inverse has two implementations -- a vectorized one for run time and the
+// scalar Laplace expansion it was derived from, which also serves constant
+// evaluation and the scalar backend. Two implementations of one contract need
+// checking against each other, not just against DirectXMath: a shared
+// misunderstanding of the convention would pass a self-comparison, and a
+// transcription slip in the vector version would pass nothing else.
+static_assert(Inverse(Matrix4x4::Identity()) == Matrix4x4::Identity());
+static_assert(Inverse(Matrix4x4{2, 0, 0, 0,
+                                0, 4, 0, 0,
+                                0, 0, 8, 0,
+                                0, 0, 0, 1})(1, 1) == 0.25f);
+
+TEST(MatrixInverse, VectorAndScalarPathsAgree) {
+    RandomVectors gen(kSeed + 94);
+    for (int n = 0; n < 128; ++n) {
+        const Matrix4x4 a = RandomInvertibleMatrix(gen);
+        EXPECT_TRUE(mathf::NearEqual(Inverse(a), mathf::detail::InverseScalar(a),
+                                     1e-5f)) << n;
+    }
+}
+
+// The compile-time path is the scalar one, so a constexpr result and a runtime
+// result on the same input come from different code and must still agree.
+TEST(MatrixInverse, CompileTimeMatchesRuntime) {
+    constexpr Matrix4x4 source{2, 1, 0, 0,
+                               0, 3, 1, 0,
+                               0, 0, 4, 1,
+                               1, 0, 0, 5};
+    constexpr Matrix4x4 compileTime = Inverse(source);
+    const Matrix4x4 runTime = Inverse(source);
+    EXPECT_TRUE(mathf::NearEqual(compileTime, runTime, 1e-5f));
+}
+
 TEST(Matrix3x3Inverse, TimesTheOriginalIsIdentity) {
     RandomVectors gen(kSeed + 93);
     for (int n = 0; n < 64; ++n) {

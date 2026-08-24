@@ -297,6 +297,103 @@ struct Minors4x4 {
     float c0, c1, c2, c3, c4, c5;   // rows 2,3 over each column pair
 };
 
+// The same Laplace expansion as the scalar path below, rearranged so each step
+// works on four values at once.
+//
+// Every 2x2 minor is a difference of two products of shuffled rows, and every
+// adjugate row turns out to be the same three-term combination of three
+// permuted columns against three minor pairs -- so the four rows differ only in
+// which inputs they pick and in an alternating sign. Deriving that regularity is
+// what makes this expressible with _mm_shuffle_ps alone; DirectXMath's own
+// version needs arbitrary two-source permutes, which this backend does not have.
+//
+//   sA = (s5,s4,s3,s2)   sB = (s1,s0,-,-)   minors of rows 0 and 1
+//   cA = (c5,c4,c3,c2)   cB = (c1,c0,-,-)   minors of rows 2 and 3
+//   kN = (cN,cN,sN,sN)
+//   pJ = column J of the matrix, permuted (1,0,3,2)
+//
+//   adj0 =  S * (p1*k5 - p2*k4 + p3*k3)     S = (+,-,+,-)
+//   adj1 = -S * (p0*k5 - p2*k2 + p3*k1)
+//   adj2 =  S * (p0*k4 - p1*k2 + p3*k0)
+//   adj3 = -S * (p0*k3 - p1*k1 + p2*k0)
+//
+// The determinant falls out of the adjugate rather than being computed again:
+// (adj * M)[0][0] is the determinant by definition, and column 0 of M is row 0
+// of the transpose, which this already has.
+#if MATHF_SIMD_SSE || MATHF_SIMD_NEON
+MATHF_NODISCARD MATHF_INLINE Matrix4x4
+InverseSimd(const Matrix4x4& mat) noexcept {
+    const VecReg r0 = mat.Row(0);
+    const VecReg r1 = mat.Row(1);
+    const VecReg r2 = mat.Row(2);
+    const VecReg r3 = mat.Row(3);
+
+    const VecReg sA = Sub(Mul(Shuffle<2, 1, 1, 0>(r0), Shuffle<3, 3, 2, 3>(r1)),
+                          Mul(Shuffle<3, 3, 2, 3>(r0), Shuffle<2, 1, 1, 0>(r1)));
+    const VecReg sB = Sub(Mul(Shuffle<0, 0, 0, 0>(r0), Shuffle<2, 1, 2, 1>(r1)),
+                          Mul(Shuffle<2, 1, 2, 1>(r0), Shuffle<0, 0, 0, 0>(r1)));
+    const VecReg cA = Sub(Mul(Shuffle<2, 1, 1, 0>(r2), Shuffle<3, 3, 2, 3>(r3)),
+                          Mul(Shuffle<3, 3, 2, 3>(r2), Shuffle<2, 1, 1, 0>(r3)));
+    const VecReg cB = Sub(Mul(Shuffle<0, 0, 0, 0>(r2), Shuffle<2, 1, 2, 1>(r3)),
+                          Mul(Shuffle<2, 1, 2, 1>(r2), Shuffle<0, 0, 0, 0>(r3)));
+
+    // Two lanes of c and two of s: the two-source shuffle takes its low half
+    // from the first operand and its high half from the second, which is exactly
+    // the (c,c,s,s) shape these need.
+    const VecReg k5 = Shuffle<0, 0, 0, 0>(cA, sA);
+    const VecReg k4 = Shuffle<1, 1, 1, 1>(cA, sA);
+    const VecReg k3 = Shuffle<2, 2, 2, 2>(cA, sA);
+    const VecReg k2 = Shuffle<3, 3, 3, 3>(cA, sA);
+    const VecReg k1 = Shuffle<0, 0, 0, 0>(cB, sB);
+    const VecReg k0 = Shuffle<1, 1, 1, 1>(cB, sB);
+
+    // Transposed in registers with the row order already permuted to (1,0,3,2),
+    // so the pJ vectors come out directly. Calling Transpose() instead would
+    // build a Matrix4x4, store all sixteen floats, and load them straight back,
+    // and would still need four more shuffles to apply the permute.
+    const VecReg lo01 = Shuffle<0, 1, 0, 1>(r1, r0);
+    const VecReg hi01 = Shuffle<2, 3, 2, 3>(r1, r0);
+    const VecReg lo23 = Shuffle<0, 1, 0, 1>(r3, r2);
+    const VecReg hi23 = Shuffle<2, 3, 2, 3>(r3, r2);
+
+    const VecReg p0 = Shuffle<0, 2, 0, 2>(lo01, lo23);
+    const VecReg p1 = Shuffle<1, 3, 1, 3>(lo01, lo23);
+    const VecReg p2 = Shuffle<0, 2, 0, 2>(hi01, hi23);
+    const VecReg p3 = Shuffle<1, 3, 1, 3>(hi01, hi23);
+    // Column 0 of the matrix, for the determinant below.
+    const VecReg t0 = Shuffle<2, 0, 2, 0>(lo01, lo23);
+
+    // Sign alternation as an XOR of the sign bit rather than a multiply by
+    // +/-1: one bitwise op instead of a multiply, and exact for zeros.
+    const VecReg flipOdd = MakeMaskReg(0, kSignBit, 0, kSignBit);
+    const VecReg flipEven = MakeMaskReg(kSignBit, 0, kSignBit, 0);
+
+    const VecReg adj0 =
+        Xor(MulAdd(p3, k3, NegMulAdd(p2, k4, Mul(p1, k5))), flipOdd);
+    const VecReg adj1 =
+        Xor(MulAdd(p3, k1, NegMulAdd(p2, k2, Mul(p0, k5))), flipEven);
+    const VecReg adj2 =
+        Xor(MulAdd(p3, k0, NegMulAdd(p1, k2, Mul(p0, k4))), flipOdd);
+    const VecReg adj3 =
+        Xor(MulAdd(p2, k0, NegMulAdd(p1, k1, Mul(p0, k3))), flipEven);
+
+    // Dot4 already broadcasts the determinant across every lane, so the
+    // reciprocal stays in vector registers. Extracting it to divide in scalar
+    // and broadcasting the result back costs a round trip through the scalar
+    // unit for no benefit.
+    const VecReg det = Dot4(adj0, t0);
+    if (GetX(det) == 0.0f) return Matrix4x4::Identity();
+
+    const VecReg invDet = Div(Splat(1.0f), det);
+    Matrix4x4 result;
+    result.SetRow(0, Mul(adj0, invDet));
+    result.SetRow(1, Mul(adj1, invDet));
+    result.SetRow(2, Mul(adj2, invDet));
+    result.SetRow(3, Mul(adj3, invDet));
+    return result;
+}
+#endif
+
 MATHF_NODISCARD MATHF_INLINE constexpr Minors4x4
 ComputeMinors(const Matrix4x4& x) noexcept {
     return Minors4x4{
@@ -329,8 +426,10 @@ Determinant(const Matrix4x4& mat) noexcept {
 // output to zero; a caller that ignores the return value gets NaN spreading
 // through the scene either way, so this returns something usable and reports
 // singularity through the Determinant call the caller should already be making.
+namespace detail {
+
 MATHF_NODISCARD MATHF_INLINE constexpr Matrix4x4
-Inverse(const Matrix4x4& mat) noexcept {
+InverseScalar(const Matrix4x4& mat) noexcept {
     const detail::Minors4x4 k = detail::ComputeMinors(mat);
 
     const float det = k.s0 * k.c5 - k.s1 * k.c4 + k.s2 * k.c3
@@ -361,6 +460,21 @@ Inverse(const Matrix4x4& mat) noexcept {
     r.m[3][2] = (-x[3][0] * k.s3 + x[3][1] * k.s1 - x[3][2] * k.s0) * invDet;
     r.m[3][3] = ( x[2][0] * k.s3 - x[2][1] * k.s1 + x[2][2] * k.s0) * invDet;
     return r;
+}
+
+} // namespace detail
+
+// The scalar expansion is the definition; the SIMD version was derived from it
+// and the tests check the two against each other as well as against
+// DirectXMath. Constant evaluation always takes the scalar path.
+MATHF_NODISCARD MATHF_INLINE constexpr Matrix4x4
+Inverse(const Matrix4x4& mat) noexcept {
+#if MATHF_SIMD_SSE || MATHF_SIMD_NEON
+    MATHF_IF_CONSTEVAL { return detail::InverseScalar(mat); }
+    return detail::InverseSimd(mat);
+#else
+    return detail::InverseScalar(mat);
+#endif
 }
 
 // ------------------------------------------------------------------ comparison
