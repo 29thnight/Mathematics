@@ -1,158 +1,258 @@
 # Mathematics
 
-DirectXMath급 성능을 목표로 하는 C++20/23 게임 수학 라이브러리.
-헤더 온리이며 x64(SSE/AVX2)와 ARM64(NEON), 스칼라 폴백을 지원한다.
+[![CI](https://github.com/29thnight/mathf/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/29thnight/mathf/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **상태: Phase 0~5 기능 구현 완료, 0.1 릴리스 게이트는 아직 미통과.** 기하 회귀 3건과
-> `cross`/전치/쿼터니언 곱 성능 회귀는 해결됐고, 두 Windows 컴파일러의 해당 성능 비교와
-> GCC x86 활성 코드의 line coverage 80%를 CI가 강제한다. 남은 릴리스 블록은 clang-cl 행렬 곱 처리량과
-> 전체 성능 표의 자동화 범위다. 현재 판정은 [docs/PLAN.md](docs/PLAN.md), 측정치는
-> [docs/BASELINE.md](docs/BASELINE.md) 참조.
+DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 게임 수학 라이브러리다.
+헤더 온리이며 x64의 SSE2/AVX2, ARM64의 NEON, 이식성 검증을 위한 스칼라 폴백을 지원한다.
 
-## 무엇이 다른가
+> **개발 상태:** Phase 0~5 기능 구현은 완료됐지만 0.1 릴리스 게이트는 아직 미통과다.
+> 기하 회귀 3건과 `cross`·행렬 전치·쿼터니언 곱 성능 회귀는 해결됐고, CI가 해당
+> 성능 비교와 GCC line coverage 80%를 강제한다. 남은 릴리스 블록은 clang-cl 행렬 곱
+> 처리량과 전체 성능 표의 자동화 범위다. 상세 판정은 [PLAN](docs/PLAN.md), 측정치는
+> [BASELINE](docs/BASELINE.md)을 기준으로 한다.
 
-**대부분의 핵심 연산은 DirectXMath와 동급이거나 더 빠르고, API는 현대적이다.**
-Phase 0에서 저수준 연산의 어셈블리가 DXMath와 명령어 단위로 동일함을 확인했으며
-([docs/SPIKE-RESULTS.md](docs/SPIKE-RESULTS.md)), 전체 API 감사에서 발견한 회귀와 아직
-남은 clang-cl 행렬 곱 차이도 측정 근거와 함께 기록한다
-([docs/BASELINE.md §6](docs/BASELINE.md#6-최종-성능-감사-phase-5)).
+> **0.1 API 변경:** 라이브러리 이름은 `Mathematics`, 공개 헤더 경로는
+> `<mathematics/...>`, 네임스페이스는 `math`다. 옛 이름을 위한 호환 별칭은 제공하지 않는다.
 
-```cpp
-#include <mathematics/vec_reg.hpp>
+## 핵심 특징
 
-// 런타임: SSE/NEON 인트린식으로 실행
-const auto v = math::mul_add(a, b, c);
+- `vector2/3/4`, `matrix3x3/4x4`, `quaternion`, `plane`, `ray`, `aabb`, `sphere` 제공
+- 벡터·행렬·쿼터니언·TRS·뷰/투영·교차 판정을 하나의 헤더 온리 API로 구성
+- 같은 API를 런타임 SIMD 경로와 `constexpr` 상수 평가에서 사용
+- DirectXMath 패리티 테스트와 스칼라 참조 테스트로 수치·관례를 교차 검증
+- MSVC, clang-cl, GCC, Clang과 x64/ARM64 백엔드를 CI에서 검증
+- `std::format` 지원은 `<mathematics/format.hpp>`로 선택적으로 제공
 
-// 컴파일 타임: 같은 코드가 상수 평가된다. DXMath는 이걸 못 한다.
-static_assert(math::get_x(math::dot4(math::set(1, 2, 3, 4),
-                                      math::set(1, 1, 1, 1))) == 10.0f);
+## 빠른 시작
+
+### CMake에 연결
+
+저장소를 프로젝트 안에 배치한 뒤 정본 타깃 `Mathematics::Mathematics`에 링크한다.
+
+```cmake
+add_subdirectory(external/mathematics)
+
+target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
+target_compile_features(my_game PRIVATE cxx_std_20)
 ```
 
-| | Mathematics | DirectXMath | GLM | Vectormath |
-|---|---|---|---|---|
-| mul_add 지연 | 2.25 ns | 2.25 ns | 2.25 ns | 2.31 ns |
-| dot4 지연 | 4.42 ns | 4.40 ns | — | — |
-| mul_add 처리량 | 976 M/s | 968 M/s | 586 M/s | 982 M/s |
-| constexpr 전체 지원 | O | X | 부분 | X |
-| 플랫폼 | Windows / Linux / ARM64 | Windows 중심 | 전 플랫폼 | 전 플랫폼 |
+`add_subdirectory` 소비자에게는 Mathematics의 테스트·벤치마크·경고 옵션이 전파되지 않는다.
 
-측정 조건과 주의사항은 [docs/BASELINE.md](docs/BASELINE.md)에 있다 — 특히 MSVC에서
-**C++20으로 빌드하면 약 2배 느려진다** (`if consteval` 부재).
-
-## API 명명
-
-- 라이브러리와 CMake 패키지 이름은 `Mathematics`다.
-- 공개 헤더는 `<mathematics/...>`, 전체 헤더는 `<mathematics/mathematics.hpp>`다.
-- C++ 네임스페이스는 `math`다.
-- 타입, 함수, 변수, 열거형 값은 STL과 같은 `lower_snake_case`를 사용한다.
+### C++에서 사용
 
 ```cpp
 #include <mathematics/mathematics.hpp>
 
-const math::vector3 axis{0.0f, 1.0f, 0.0f};
-const math::quaternion turn =
-    math::quaternion_from_axis_angle(axis, math::half_pi);
+const math::vector3 local_position{1.0f, 0.0f, 0.0f};
+const math::quaternion rotation = math::quaternion_from_axis_angle(
+    math::vector3::unit_y(), math::radians(30.0f));
+
+// 적용 순서: 크기 → 회전 → 이동
+const math::matrix4x4 world = math::compose(
+    math::vector3::one(), rotation, math::vector3{10.0f, 0.0f, 5.0f});
+
+const math::vector3 world_position =
+    math::transform_point(local_position, world);
+
+constexpr math::vector3 x = math::vector3::unit_x();
+constexpr math::vector3 y = math::vector3::unit_y();
+static_assert(math::cross(x, y) == math::vector3::unit_z());
 ```
 
-## 요구 사항
+전체 사용법과 퇴화 입력 정책은 [사용 가이드](docs/GUIDE.md)에 정리돼 있다.
 
-- C++20 이상 (C++23 기능은 감지되면 자동 활용)
-- MSVC 19.3x+ / Clang 15+ / GCC 12+
-- CMake 3.24+
+## API와 수학 관례
 
-## 빌드
+### 명명 규칙
 
-Windows에서는 Visual Studio 개발자 환경을 자동으로 잡아주는 스크립트를 쓴다.
+| 대상 | 규칙 | 예시 |
+|------|------|------|
+| 라이브러리·CMake 프로젝트 | `Mathematics` | `project(Mathematics)` |
+| CMake 정본 타깃 | `Mathematics::Mathematics` | `target_link_libraries(...)` |
+| 공개 헤더 | `mathematics/` | `<mathematics/vector3.hpp>` |
+| 네임스페이스 | `math` | `math::vector3` |
+| 타입·함수·변수·열거형 값 | `lower_snake_case` | `matrix4x4`, `look_at_lh` |
+| 전처리 매크로 | 대문자 접두사 | `MATHEMATICS_FORCE_SCALAR` |
 
-```bash
+### 좌표와 합성 규약
+
+| 항목 | 규약 |
+|------|------|
+| 행렬 저장 | row-major, `m[row][column]` |
+| 벡터 | 행벡터, `v * m` |
+| 합성 순서 | 왼쪽에서 오른쪽, `scale * rotation * translation` |
+| 이동 성분 | `matrix4x4`의 3행 |
+| 쿼터니언 | `(x, y, z, w)`, 스칼라가 마지막 |
+| 쿼터니언 곱 | `a * b`는 `a` 적용 후 `b` 적용 |
+| 손잡이 | `_lh`/`_rh` 접미사 필수, 무접미사 기본 함수 없음 |
+| 깊이 범위 | Direct3D 방식 `[0, 1]` |
+| 각도 | 라디안, `radians()`/`degrees()`로 변환 |
+
+이 규약들은 DirectXMath 결과와 테스트로 고정돼 있다. 특히 행렬·쿼터니언 합성 순서는
+일반적인 열벡터 수학 라이브러리와 다를 수 있으므로 이주 전에 [GUIDE](docs/GUIDE.md)를
+확인해야 한다.
+
+### 헤더 선택
+
+| 용도 | 헤더 |
+|------|------|
+| 전체 API | `<mathematics/mathematics.hpp>` |
+| 스칼라·각도·삼각함수 | `<mathematics/scalar.hpp>` |
+| 벡터 | `<mathematics/vector.hpp>` 또는 개별 `vector2/3/4.hpp` |
+| 행렬 | `<mathematics/matrix.hpp>` 또는 개별 `matrix3x3/4x4.hpp` |
+| 쿼터니언·변환 | `<mathematics/quaternion.hpp>`, `<mathematics/transform.hpp>` |
+| 기하·교차 판정 | `<mathematics/geometry.hpp>` |
+| 저수준 레지스터 API | `<mathematics/vec_reg.hpp>` |
+| `std::format` | `<mathematics/format.hpp>` |
+
+`format.hpp`는 `<format>`의 컴파일 비용을 사용하지 않는 번역 단위에 부과하지 않도록
+우산 헤더에서 의도적으로 제외했다.
+
+## 요구 사항과 지원 환경
+
+- C++20 이상. 지원 컴파일러에서는 자체 타깃을 C++23으로 빌드한다.
+- CMake 3.24 이상
+- MSVC 19.3x 이상, Clang 15 이상, GCC 12 이상
+
+| 환경 | CI 검증 경로 |
+|------|-------------|
+| Windows x64 / MSVC | Release, Debug, 스칼라 폴백, SSE2 baseline |
+| Windows x64 / clang-cl | Release |
+| Linux x64 / GCC·Clang | Release |
+| Linux ARM64 / GCC·Clang | NEON Release |
+
+MSVC에서 C++20 모드만 사용하면 `if consteval` 부재로 일부 저수준 연산이 약 2배 느려질
+수 있다. 성능이 중요한 MSVC 소비자는 C++23 모드를 권장한다.
+
+## 빌드와 테스트
+
+### Windows 프리셋
+
+Visual Studio 개발자 환경과 CMake 경로는 스크립트가 자동으로 설정한다.
+
+```powershell
 scripts\build.bat msvc-release
 ```
 
-사용 가능한 프리셋: `msvc-release`, `msvc-debug`, `clang-release`, `scalar-release`,
-그리고 Visual Studio 솔루션용 `vs2026-release`, `vs2026-debug`.
+| 프리셋 | 목적 |
+|--------|------|
+| `msvc-release` | MSVC AVX2/FMA Release |
+| `msvc-debug` | MSVC Debug |
+| `clang-release` | clang-cl AVX2/FMA Release |
+| `scalar-release` | SIMD를 끈 스칼라 폴백 |
+| `sse2-release` | SSE4.1/AVX/FMA를 끈 x64 baseline |
+| `vs2026-release`, `vs2026-debug` | Visual Studio 솔루션 빌드 |
 
-CMake를 직접 쓸 경우:
+CMake를 직접 호출할 수도 있다.
 
-```bash
-cmake --preset msvc-release && cmake --build --preset msvc-release && ctest --preset msvc-release
+```powershell
+cmake --preset msvc-release
+cmake --build --preset msvc-release
+ctest --preset msvc-release
 ```
 
-빌드 산출물은 `%LOCALAPPDATA%\MathematicsBuild\`에 생성된다 — 이 저장소가 OneDrive 동기화
-폴더에 있을 때 빌드 중 파일이 동기화되어 깨지는 것을 막기 위해서다.
+Ninja 프리셋 산출물은 OneDrive 동기화 간섭을 피하기 위해
+`%LOCALAPPDATA%\MathematicsBuild\<preset>\`에 생성된다.
 
-### Visual Studio 2026에서 확인하기
-
-솔루션을 생성하고 IDE로 여는 것까지 한 번에:
+### Linux
 
 ```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+### 감지된 백엔드 확인
+
+빌드된 `mathematics_config_report`는 컴파일러, 언어 표준, 아키텍처와 활성 SIMD 기능을
+출력한다.
+
+```powershell
+& "$env:LOCALAPPDATA\MathematicsBuild\msvc-release\tools\mathematics_config_report.exe"
+```
+
+Linux에서는 `./build/tools/mathematics_config_report`를 실행한다.
+
+### Visual Studio 2026
+
+솔루션을 생성하고 열려면 다음 스크립트를 사용한다.
+
+```powershell
 scripts\open_vs.bat
 ```
 
-`%LOCALAPPDATA%\MathematicsBuild\vs2026\Mathematics.slnx`가 만들어지고 Visual Studio가 열린다.
-(VS2026의 CMake 생성기는 XML 솔루션 형식인 `.slnx`를 쓴다. 생성만 하고 열지 않으려면
-`--no-open`.) 솔루션은 멀티 구성이라 `Debug`/`Release`/`RelWithDebInfo`/`MinSizeRel`을
-IDE에서 골라 쓰면 되고, 시작 프로젝트가 `mathematics_tests`로 지정되어 있어 F5로 바로 테스트가
-돈다. 전체 테스트는 `RUN_TESTS` 프로젝트를 빌드하면 ctest로 실행된다. 테스트 탐색기에서
-개별 테스트를 다루려면 GoogleTest 어댑터가 필요한데, 이 저장소의 `.vsconfig`에 포함되어
-있어 구성 요소가 빠져 있으면 VS가 설치를 제안한다.
+생성만 하려면 `scripts\open_vs.bat --no-open`을 사용한다. 솔루션은
+`%LOCALAPPDATA%\MathematicsBuild\vs2026\Mathematics.slnx`에 생성되며,
+`mathematics_tests`가 시작 프로젝트로 지정된다.
 
-솔루션 탐색기 구성:
+## CMake 옵션
 
-| 폴더 | 프로젝트 |
-|------|---------|
-| `Mathematics` | `mathematics_tests`, `mathematics_bench`, `mathematics_config_report`, `mathematics_headers` |
-| `ThirdParty` | GoogleTest, Google Benchmark, GLM |
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `MATHEMATICS_BUILD_TESTS` | 최상위 `ON`, 하위 프로젝트 `OFF` | GoogleTest 테스트 빌드 |
+| `MATHEMATICS_BUILD_BENCH` | 최상위 `ON`, 하위 프로젝트 `OFF` | Google Benchmark 빌드 |
+| `MATHEMATICS_BUILD_TOOLS` | 최상위 `ON`, 하위 프로젝트 `OFF` | 설정 보고 도구 빌드 |
+| `MATHEMATICS_FORCE_SCALAR` | `OFF` | SIMD 대신 스칼라 백엔드 강제 |
+| `MATHEMATICS_BASELINE_SSE2` | `OFF` | x86에서 SSE2 경로만 사용 |
+| `MATHEMATICS_ENABLE_COVERAGE` | `OFF` | GCC/gcov line coverage 계측 |
+| `MATHEMATICS_BENCH_GLM` | `ON` | 벤치마크에 GLM 비교 포함 |
+| `MATHEMATICS_BENCH_VECTORMATH` | x86에서 `ON` | 벤치마크에 Vectormath 비교 포함 |
 
-`mathematics_headers`는 빌드되지 않는 열람 전용 프로젝트다 — 헤더 온리 라이브러리는 그대로
-두면 솔루션에 아무 프로젝트도 만들지 않아 `include/mathematics/`를 IDE에서 탐색할 수 없다.
+## 검증과 CI 게이트
 
-같은 솔루션을 IDE 없이 명령줄에서 빌드·검증하려면:
+| 게이트 | 검증 내용 |
+|--------|-----------|
+| Windows | MSVC Release/Debug, clang-cl Release, scalar, SSE2 baseline |
+| Linux x64 | GCC와 Clang 빌드·테스트 |
+| Linux ARM64 | GCC와 Clang의 NEON 빌드·테스트 |
+| 정확성 | constexpr·스칼라 참조·DirectXMath 패리티 |
+| 성능 | MSVC/clang-cl에서 `cross`, 전치, 쿼터니언 곱을 DXMath와 비교 |
+| 커버리지 | GCC 활성 코드 line coverage 80% 이상 |
 
-```bash
-scripts\build.bat vs2026-release
+성능 게이트는 후보가 DXMath 기준보다 5% 넘게 느리거나 측정 변동이 지나치게 크면
+실패한다. 로컬에서 같은 게이트를 실행하려면 다음 명령을 사용한다.
+
+```powershell
+.\scripts\check_performance.ps1 `
+    -BenchmarkExe "$env:LOCALAPPDATA\MathematicsBuild\msvc-release\bench\mathematics_bench.exe" `
+    -OutputPath "$env:TEMP\mathematics-performance.json"
 ```
 
-저장소를 "폴더 열기"로 열어도 된다. VS가 `CMakePresets.json`을 읽어 `vs2026`을 포함한
-프리셋 전체를 드롭다운에 보여준다.
+## 대표 성능
 
-스칼라 폴백을 IDE에서 확인하려면 별도 디렉터리에 솔루션을 하나 더 만든다. `-B`로
-출력 위치를 바꾸지 않으면 `MATHEMATICS_FORCE_SCALAR`가 기본 솔루션의 캐시에 눌러앉아, 이후
-평범하게 다시 생성해도 스칼라 빌드가 계속 나온다:
+아래 값은 Intel Core i7-8700K, MSVC C++23, AVX2/FMA 환경에서 얻은 기준선이다.
+절대 수치보다 동일 머신·동일 컴파일러에서의 상대 비교를 봐야 한다.
 
-```bash
-cmake --preset vs2026 -B "%LOCALAPPDATA%\MathematicsBuild\vs2026-scalar" -D MATHEMATICS_FORCE_SCALAR=ON
-```
+| 연산 | Mathematics | DirectXMath | GLM | Vectormath |
+|------|-------------|-------------|-----|------------|
+| `mul_add` 지연 | 2.25 ns | 2.25 ns | 2.25 ns | 2.31 ns |
+| `dot4` 지연 | 4.42 ns | 4.40 ns | — | — |
+| `mul_add` 처리량 | 976 M/s | 968 M/s | 586 M/s | 982 M/s |
 
-> CI는 Ninja 프리셋만 돌린다. GitHub 러너에는 VS2026이 없어서, 솔루션 경로는 로컬 검증
-> 수단이다.
-
-## 프로젝트에 통합
-
-```cmake
-add_subdirectory(external/mathematics)
-target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
-```
-
-`add_subdirectory`로 포함하면 테스트·벤치마크·경고 설정은 따라오지 않는다.
+재현 명령, 전체 표, 컴파일러별 차이와 알려진 clang-cl 행렬 곱 병목은
+[BASELINE](docs/BASELINE.md)에 기록돼 있다. 저수준 코드 생성 비교는
+[SPIKE-RESULTS](docs/SPIKE-RESULTS.md)를 참조한다.
 
 ## 저장소 구조
 
 | 경로 | 내용 |
 |------|------|
-| `include/mathematics/` | 라이브러리 (헤더 온리) |
-| `tests/` | GoogleTest — constexpr·스칼라 참조·DirectXMath 3중 패리티 검증 |
-| `bench/` | Google Benchmark — DXMath/GLM 대조 |
-| `spike/` | Phase 0 설계 검증 실험 (재현 가능하게 보존) |
-| `scripts/` | 빌드 스크립트 — Ninja 프리셋과 VS 솔루션 생성 |
-| `tools/` | `mathematics_config_report` — 감지된 ISA/백엔드 출력 |
-| `docs/` | 계획, 스파이크 결과, 성능 기준선 |
+| `include/mathematics/` | 공개 헤더와 SIMD/상수 평가 백엔드 |
+| `tests/` | GoogleTest 정확성·패리티·문서 예제 테스트 |
+| `bench/` | Google Benchmark 기반 DXMath/GLM/Vectormath 비교 |
+| `spike/` | Phase 0 설계·코드 생성 실험 |
+| `scripts/` | 빌드, Visual Studio, 성능 게이트 스크립트 |
+| `tools/` | 컴파일 설정·백엔드 보고 도구 |
+| `docs/` | 설계 계획, 사용 가이드, 성능 기준선 |
 
 ## 문서
 
-- [PLAN.md](docs/PLAN.md) — 설계 결정과 Phase 로드맵
-- [SPIKE-RESULTS.md](docs/SPIKE-RESULTS.md) — constexpr/코드젠 검증 실측
-- [BASELINE.md](docs/BASELINE.md) — DXMath 대비 성능 기준선
+- [GUIDE.md](docs/GUIDE.md) — 관례, 예제, 퇴화 입력 정책, DirectXMath 이주표
+- [PLAN.md](docs/PLAN.md) — 설계 결정, Phase 이력, 현재 릴리스 판정
+- [BASELINE.md](docs/BASELINE.md) — 성능 기준선과 재현 절차
+- [SPIKE-RESULTS.md](docs/SPIKE-RESULTS.md) — constexpr·SIMD 코드 생성 검증
 
 ## 라이선스
 
-미정 (MIT 예정).
+[MIT License](LICENSE)로 배포한다.
