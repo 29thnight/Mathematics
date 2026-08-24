@@ -14,7 +14,7 @@
 //   Comparison   == != (exact), near_equal(a, b, epsilon)
 //   Lane-wise    Abs Min Max Clamp Saturate Lerp
 //   Geometry     dot length length_sq distance distance_sq
-//                normalize normalize_est reflect refract
+//                normalize normalize_unchecked normalize_est reflect refract
 //   vector3      cross
 //   vector2      cross (scalar) perpendicular
 //

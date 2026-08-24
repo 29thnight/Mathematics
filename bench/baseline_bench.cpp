@@ -491,6 +491,23 @@ static void bm_mathematics_vector3_normalize_throughput(benchmark::State& state)
 }
 BENCHMARK(bm_mathematics_vector3_normalize_throughput);
 
+static void bm_mathematics_vector3_normalize_unchecked_throughput(
+    benchmark::State& state) {
+    const auto& in = vector3_data();
+    std::vector<math::vector3> out(vector3_batch_size);
+    for (auto _ : state) {
+        benchmark::ClobberMemory();
+        for (int i = 0; i < vector3_batch_size; ++i) {
+            out[static_cast<size_t>(i)] =
+                math::normalize_unchecked(in[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * vector3_batch_size);
+}
+BENCHMARK(bm_mathematics_vector3_normalize_unchecked_throughput);
+
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_vector3_normalize_throughput(benchmark::State& state) {
     const auto& in = vector3_data();

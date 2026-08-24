@@ -57,6 +57,17 @@ TEST(vector_geometry, normalize_preserves_direction) {
     EXPECT_TRUE(math::near_equal(n, vector3(0.6f, 0.8f, 0.0f)));
 }
 
+TEST(vector_geometry, normalize_unchecked_matches_normalize_for_valid_input) {
+    random_vectors gen(random_seed + 72);
+    for (int n = 0; n < sample_count; ++n) {
+        const vector3 v = random_vector3(gen);
+        const float squared_length = math::length_sq(v);
+        if (!(squared_length > 1e-6f) || !std::isfinite(squared_length)) continue;
+        EXPECT_TRUE(math::near_equal(math::normalize_unchecked(v),
+                                     math::normalize(v), 1e-6f)) << n;
+    }
+}
+
 // The whole reason normalize costs two selects rather than a bare divide.
 TEST(vector_geometry, normalize_of_zero_is_zero_not_na_n) {
     const vector3 n = math::normalize(vector3::zero());
@@ -178,6 +189,9 @@ TEST(vector_geometry, refract_returns_zero_on_total_internal_reflection) {
 // normalize_wide entirely unexercised.
 static_assert(math::normalize(vector2{3, 4}).x == 0.6f);
 static_assert(math::normalize(vector4{0, 0, 3, 4}).w == 0.8f);
+static_assert(math::normalize_unchecked(vector2{3, 4}).x == 0.6f);
+static_assert(math::normalize_unchecked(vector3{0, 3, 4}).z == 0.8f);
+static_assert(math::normalize_unchecked(vector4{0, 0, 3, 4}).w == 0.8f);
 static_assert(math::saturate(vector4{-1, 5, 0.5f, 2}).y == 1.0f);
 static_assert(math::clamp(vector2{-1, 5}, vector2::zero(), vector2::one()).x == 0.0f);
 static_assert(math::reflect(vector4{0, -1, 0, 0}, vector4::unit_y()).y == 1.0f);
@@ -187,6 +201,13 @@ TEST(vector_all_widths, normalize_produces_unit_length) {
                                  vector2(0.6f, 0.8f)));
     EXPECT_NEAR(math::length(math::normalize(vector4(1, 2, 3, 4))), 1.0f, 1e-5f);
     EXPECT_NEAR(math::length(math::normalize(vector2(-7, 11))), 1.0f, 1e-5f);
+}
+
+TEST(vector_all_widths, normalize_unchecked_produces_unit_length) {
+    EXPECT_NEAR(math::length(math::normalize_unchecked(vector2(3, 4))), 1.0f, 1e-5f);
+    EXPECT_NEAR(math::length(math::normalize_unchecked(vector3(1, 2, 3))), 1.0f, 1e-5f);
+    EXPECT_NEAR(math::length(math::normalize_unchecked(vector4(1, 2, 3, 4))), 1.0f,
+                1e-5f);
 }
 
 // The degenerate contract has to hold on the SIMD path too, not just the scalar

@@ -84,8 +84,10 @@ const vector3 world_position = math::transform_point(local_position, world);
 const vector3 world_forward = math::transform_direction(local_forward, world);
 ```
 
-`normalize(0 벡터)`는 0 벡터를 반환한다. `normalize_est`는 더 빠른 근사 함수지만
-이 보호 동작이 없으므로 입력이 정상적인 비영 벡터임을 보장할 수 있는 핫 패스에서만 쓴다.
+`normalize(0 벡터)`는 0 벡터를 반환한다. `normalize_unchecked`는 정확한 제곱근을
+사용하면서 0·비유한 입력 검사를 생략하므로, 길이제곱이 유한하고 0보다 큰 벡터임을
+보장할 수 있는 핫 패스에서 쓴다. `normalize_est`는 같은 입력 전제에 더해 근사 역제곱근으로
+정밀도를 속도와 맞바꾼다.
 
 ## 스칼라와 각도
 

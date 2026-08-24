@@ -295,6 +295,30 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vector_type normalize_wide(ve
 
 } // namespace detail
 
+// Exact normalization without degenerate-input handling. The caller guarantees
+// that the squared length is finite and greater than zero. Keeping this separate
+// from normalize() makes the contract visible at hot call sites and lets packed
+// vector2/vector3 values stay in scalar form instead of paying for a register
+// round trip solely to compute their length.
+template <vector_like vector_type>
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vector_type
+normalize_unchecked(vector_type v) noexcept {
+    float squared_length = v.x * v.x + v.y * v.y;
+    if constexpr (vector_type::lane_count >= 3) {
+        squared_length += v.z * v.z;
+    }
+    if constexpr (vector_type::lane_count == 4) {
+        squared_length += v.w * v.w;
+    }
+
+    const float inverse_length = 1.0f / detail::scalar_sqrt(squared_length);
+    v.x *= inverse_length;
+    v.y *= inverse_length;
+    if constexpr (vector_type::lane_count >= 3) v.z *= inverse_length;
+    if constexpr (vector_type::lane_count == 4) v.w *= inverse_length;
+    return v;
+}
+
 // Matches DirectXMath at the degenerate ends: a zero vector normalizes to zero
 // rather than to NaN, and an infinite one to NaN. Getting that wrong is a silent
 // source of NaN spreading through a scene graph, so it is worth paying for.
