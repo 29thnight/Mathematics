@@ -391,6 +391,22 @@ TEST(QuaternionDecompose, AxisAngleRoundTrips) {
     }
 }
 
+// A tiny but non-zero angle: vLength is ~5e-7, so 1/vLength is enormous and any
+// sloppiness in the normalize-and-scale shows up as a non-unit axis. The random
+// sweeps essentially never land here.
+TEST(QuaternionDecompose, TinyAngleKeepsAUnitAxis) {
+    for (float angle : {1e-6f, 1e-5f, 1e-4f}) {
+        const Quaternion q =
+            mathf::QuaternionFromAxisAngle(Vector3{0, 1, 0}, angle);
+        Vector3 axis; float outAngle = 0.0f;
+        mathf::ToAxisAngle(q, axis, outAngle);
+        EXPECT_NEAR(mathf::Length(axis), 1.0f, 1e-4f) << angle;
+        // Relative, not absolute: the angle itself is the small quantity here.
+        EXPECT_NEAR(outAngle, angle, angle * 1e-2f + 1e-9f) << angle;
+        EXPECT_TRUE(NearVector(axis, Vector3{0, 1, 0}, 1e-3f)) << angle;
+    }
+}
+
 // The identity has no axis. Reporting +X with a zero angle beats dividing by
 // the zero-length vector part.
 TEST(QuaternionDecompose, IdentityHasADefinedAxis) {
@@ -494,6 +510,31 @@ static_assert(kCompileTimeMatrix.m[0][1] > 0.999f);   // +X row maps to +Y
 constexpr Vector3 kCompileTimeRotated =
     mathf::Rotate(Vector3{1, 0, 0}, kCompileTimeZ);
 static_assert(kCompileTimeRotated.y > 0.999f);
+
+// Slerp, Nlerp and the decompositions carry constexpr; nothing proved they
+// survive constant evaluation until a user tried. Out-parameter functions get
+// constexpr wrapper functions, since a static_assert cannot bind an lvalue.
+constexpr Quaternion kCompileTimeSlerp =
+    mathf::Slerp(Quaternion::Identity(), kCompileTimeZ, 0.5f);
+static_assert(kCompileTimeSlerp.w > 0.9f);   // an eighth turn about Z
+static_assert(kCompileTimeSlerp.z > 0.38f && kCompileTimeSlerp.z < 0.39f);
+
+constexpr Quaternion kCompileTimeNlerp =
+    mathf::Nlerp(Quaternion::Identity(), kCompileTimeZ, 0.25f);
+static_assert(kCompileTimeNlerp.w > 0.9f);
+
+constexpr Vector3 kCompileTimeEuler = mathf::ToEuler(kCompileTimeZ);
+static_assert(kCompileTimeEuler.z > 1.57f && kCompileTimeEuler.z < 1.58f);
+static_assert(kCompileTimeEuler.x < 1e-5f && kCompileTimeEuler.x > -1e-5f);
+
+namespace {
+constexpr float CompileTimeAxisAngle() {
+    Vector3 axis; float angle = 0.0f;
+    mathf::ToAxisAngle(kCompileTimeZ, axis, angle);
+    return angle + axis.z;   // both halves observable in one value
+}
+} // namespace
+static_assert(CompileTimeAxisAngle() > 2.57f);   // pi/2 + 1.0
 
 // The whole pipeline in one constant expression.
 constexpr Quaternion kRoundTripped =

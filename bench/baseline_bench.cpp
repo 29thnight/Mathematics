@@ -18,6 +18,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <random>
 #include <vector>
 
@@ -477,6 +479,8 @@ static void BM_Mathf_Vector3_Normalize_Throughput(benchmark::State& state) {
     const auto& in = Vector3Data();
     std::vector<mathf::Vector3> out(kVec3Batch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kVec3Batch; ++i) {
             out[static_cast<size_t>(i)] = mathf::Normalize(in[static_cast<size_t>(i)]);
         }
@@ -492,6 +496,8 @@ static void BM_DXMath_Vector3_Normalize_Throughput(benchmark::State& state) {
     const auto& in = Vector3Data();
     std::vector<DirectX::XMFLOAT3> out(kVec3Batch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kVec3Batch; ++i) {
             const auto* q =
                 reinterpret_cast<const DirectX::XMFLOAT3*>(&in[static_cast<size_t>(i)].x);
@@ -512,6 +518,8 @@ static void BM_GLM_Vector3_Normalize_Throughput(benchmark::State& state) {
     const auto& in = Vector3Data();
     std::vector<glm::vec3> out(kVec3Batch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kVec3Batch; ++i) {
             const auto& v = *reinterpret_cast<const glm::vec3*>(
                 &in[static_cast<size_t>(i)].x);
@@ -538,6 +546,7 @@ constexpr mathf::Matrix4x4 kQuarterTurnZ{ 0, 1, 0, 0,
 
 constexpr int kMatrixBatch = 256;
 
+
 const std::vector<mathf::Matrix4x4>& MatrixData() {
     static const std::vector<mathf::Matrix4x4> data = [] {
         std::mt19937 rng(kSeed);
@@ -553,6 +562,47 @@ const std::vector<mathf::Matrix4x4>& MatrixData() {
     }();
     return data;
 }
+
+// The inverse benchmarks read their input and write their output through this
+// arena, which pins the two arrays' RELATIVE page offset instead of leaving it
+// to the allocator.
+//
+// It exists because the inverse numbers would not reproduce: the same binary
+// measured 47, 54 and 74 M/s in different processes, each internally
+// consistent. The cause is 4K aliasing -- when a store's low twelve address
+// bits match an upcoming load's, the load is falsely held back behind the
+// store -- and whether the input and output vectors collided that way was
+// decided by ASLR, differently every process. A probe with a controlled
+// offset pinned it: 48.6 M/s at a relative offset of 64 bytes (each store
+// aliasing the very next iteration's load), 58 at 16, a flat 79 from 128 up.
+// Phase 3 documented the irreproducibility as an open confusion; this was it.
+// Half a page of separation parks every library's run in the flat region, so
+// the comparison measures the arithmetic and not the allocator's mood.
+struct InverseArena {
+    std::vector<unsigned char> storage;
+    unsigned char* in;
+    unsigned char* out;
+
+    InverseArena()
+        : storage(2 * kMatrixBatch * sizeof(mathf::Matrix4x4) + 3 * 4096) {
+        const auto base = reinterpret_cast<std::uintptr_t>(storage.data());
+        const std::uintptr_t page = (base + 4095u) & ~std::uintptr_t{4095u};
+        in = reinterpret_cast<unsigned char*>(page);
+        const std::uintptr_t afterIn =
+            (page + kMatrixBatch * sizeof(mathf::Matrix4x4) + 4095u) &
+            ~std::uintptr_t{4095u};
+        out = reinterpret_cast<unsigned char*>(afterIn + 2048u);
+
+        std::memcpy(in, MatrixData().data(),
+                    kMatrixBatch * sizeof(mathf::Matrix4x4));
+    }
+};
+
+InverseArena& Arena() {
+    static InverseArena arena;
+    return arena;
+}
+
 
 } // namespace
 
@@ -585,6 +635,8 @@ static void BM_Mathf_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
     const auto& d = MatrixData();
     std::vector<mathf::Matrix4x4> out(kMatrixBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch / 2; ++i) {
             out[static_cast<size_t>(i)] =
                 d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + kMatrixBatch / 2)];
@@ -601,6 +653,8 @@ static void BM_DXMath_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
     const auto& d = MatrixData();
     std::vector<DirectX::XMFLOAT4X4> out(kMatrixBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch / 2; ++i) {
             const auto* qa = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
                 &d[static_cast<size_t>(i)].m[0][0]);
@@ -627,6 +681,8 @@ static void BM_GLM_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
     const auto& d = MatrixData();
     std::vector<glm::mat4> out(kMatrixBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch / 2; ++i) {
             const auto& a = *reinterpret_cast<const glm::mat4*>(
                 &d[static_cast<size_t>(i)].m[0][0]);
@@ -643,13 +699,16 @@ BENCHMARK(BM_GLM_Matrix4x4_Multiply_Throughput);
 #endif
 
 static void BM_Mathf_Matrix4x4_Inverse(benchmark::State& state) {
-    const auto& d = MatrixData();
-    std::vector<mathf::Matrix4x4> out(kMatrixBatch);
+    auto& arena = Arena();
+    const auto* in = reinterpret_cast<const mathf::Matrix4x4*>(arena.in);
+    auto* out = reinterpret_cast<mathf::Matrix4x4*>(arena.out);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch; ++i) {
-            out[static_cast<size_t>(i)] = mathf::Inverse(d[static_cast<size_t>(i)]);
+            out[i] = mathf::Inverse(in[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * kMatrixBatch);
@@ -658,17 +717,18 @@ BENCHMARK(BM_Mathf_Matrix4x4_Inverse);
 
 #if MATHF_BENCH_HAS_DXMATH
 static void BM_DXMath_Matrix4x4_Inverse(benchmark::State& state) {
-    const auto& d = MatrixData();
-    std::vector<DirectX::XMFLOAT4X4> out(kMatrixBatch);
+    auto& arena = Arena();
+    const auto* in = reinterpret_cast<const DirectX::XMFLOAT4X4*>(arena.in);
+    auto* out = reinterpret_cast<DirectX::XMFLOAT4X4*>(arena.out);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch; ++i) {
-            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
-                &d[static_cast<size_t>(i)].m[0][0]);
             DirectX::XMStoreFloat4x4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(q)));
+                &out[i],
+                DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(&in[i])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * kMatrixBatch);
@@ -678,15 +738,16 @@ BENCHMARK(BM_DXMath_Matrix4x4_Inverse);
 
 #if MATHF_BENCH_HAS_GLM
 static void BM_GLM_Matrix4x4_Inverse(benchmark::State& state) {
-    const auto& d = MatrixData();
-    std::vector<glm::mat4> out(kMatrixBatch);
+    auto& arena = Arena();
+    const auto* in = reinterpret_cast<const glm::mat4*>(arena.in);
+    auto* out = reinterpret_cast<glm::mat4*>(arena.out);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kMatrixBatch; ++i) {
-            const auto& a = *reinterpret_cast<const glm::mat4*>(
-                &d[static_cast<size_t>(i)].m[0][0]);
-            out[static_cast<size_t>(i)] = glm::inverse(a);
+            out[i] = glm::inverse(in[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * kMatrixBatch);
@@ -702,6 +763,8 @@ static void BM_Mathf_MulAdd_Throughput(benchmark::State& state) {
     const auto& d = Data();
     std::vector<Float4> out(kBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kBatch; ++i) {
             const mathf::VecReg a = mathf::LoadAligned(d[i].v);
             const mathf::VecReg b = mathf::LoadAligned(d[i + kBatch].v);
@@ -721,6 +784,8 @@ static void BM_DXMath_MulAdd_Throughput(benchmark::State& state) {
     const auto& d = Data();
     std::vector<DirectX::XMFLOAT4A> out(kBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kBatch; ++i) {
             const auto* qa = reinterpret_cast<const DirectX::XMFLOAT4A*>(d[i].v);
             const auto* qb =
@@ -746,6 +811,8 @@ static void BM_GLM_MulAdd_Throughput(benchmark::State& state) {
     const auto& d = Data();
     std::vector<glm::vec4> out(kBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kBatch; ++i) {
             const auto& a = *reinterpret_cast<const glm::vec4*>(d[i].v);
             const auto& b = *reinterpret_cast<const glm::vec4*>(d[i + kBatch].v);
@@ -766,6 +833,8 @@ static void BM_Vectormath_MulAdd_Throughput(benchmark::State& state) {
     const auto& d = Data();
     std::vector<Vectormath::SSE::Vector4> out(kBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kBatch; ++i) {
             // Vectormath exposes no load helper for Vector4, but it is an
             // SSE-native type with a __m128 constructor, so this is the
@@ -876,6 +945,8 @@ static void BM_Mathf_Quaternion_Multiply_Throughput(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<mathf::Quaternion> out(kQuatBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch / 2; ++i) {
             out[static_cast<size_t>(i)] =
                 d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + kQuatBatch / 2)];
@@ -892,6 +963,8 @@ static void BM_DXMath_Quaternion_Multiply_Throughput(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<DirectX::XMFLOAT4> out(kQuatBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch / 2; ++i) {
             const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
                 &d[static_cast<size_t>(i)].x);
@@ -910,14 +983,30 @@ static void BM_DXMath_Quaternion_Multiply_Throughput(benchmark::State& state) {
 BENCHMARK(BM_DXMath_Quaternion_Multiply_Throughput);
 #endif
 
+// Each result is escaped individually, and the interpolation parameter is made
+// opaque per outer iteration. Both are load-bearing.
+//
+// Everything the inner loop reads is otherwise loop-invariant, so a compiler
+// may hoist the whole batch out of the timing loop. Clang did exactly that to
+// the DirectXMath version, which reported 0.245 ns for 128 slerps -- 523 G/s,
+// three orders of magnitude past plausible, and the kind of number that reads
+// as a win if nobody checks it. The usual `DoNotOptimize(out.data())` after the
+// loop was not enough: it escapes the pointer, not what was written through it,
+// so the stores stayed dead. Making `t` opaque was not enough either.
+// DoNotOptimize on each element is, and it costs both sides the same.
 static void BM_Mathf_Quaternion_Slerp(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<mathf::Quaternion> out(kQuatBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
+        float t = 0.37f;
+        benchmark::DoNotOptimize(t);
         for (int i = 0; i < kQuatBatch / 2; ++i) {
             out[static_cast<size_t>(i)] =
                 mathf::Slerp(d[static_cast<size_t>(i)],
-                             d[static_cast<size_t>(i + kQuatBatch / 2)], 0.37f);
+                             d[static_cast<size_t>(i + kQuatBatch / 2)], t);
+            benchmark::DoNotOptimize(out[static_cast<size_t>(i)]);
         }
         benchmark::DoNotOptimize(out.data());
         benchmark::ClobberMemory();
@@ -931,6 +1020,10 @@ static void BM_DXMath_Quaternion_Slerp(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<DirectX::XMFLOAT4> out(kQuatBatch / 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
+        float t = 0.37f;
+        benchmark::DoNotOptimize(t);
         for (int i = 0; i < kQuatBatch / 2; ++i) {
             const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
                 &d[static_cast<size_t>(i)].x);
@@ -939,7 +1032,8 @@ static void BM_DXMath_Quaternion_Slerp(benchmark::State& state) {
             DirectX::XMStoreFloat4(
                 &out[static_cast<size_t>(i)],
                 DirectX::XMQuaternionSlerp(DirectX::XMLoadFloat4(a),
-                                           DirectX::XMLoadFloat4(b), 0.37f));
+                                           DirectX::XMLoadFloat4(b), t));
+            benchmark::DoNotOptimize(out[static_cast<size_t>(i)]);
         }
         benchmark::DoNotOptimize(out.data());
         benchmark::ClobberMemory();
@@ -956,6 +1050,8 @@ static void BM_Mathf_Quaternion_RotateVector(benchmark::State& state) {
     const auto& v = Data();
     std::vector<mathf::Vector3> out(kQuatBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             const mathf::Vector3 p{v[static_cast<size_t>(i)].v[0],
                                    v[static_cast<size_t>(i)].v[1],
@@ -976,6 +1072,8 @@ static void BM_DXMath_Quaternion_RotateVector(benchmark::State& state) {
     const auto& v = Data();
     std::vector<DirectX::XMFLOAT3> out(kQuatBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
                 &d[static_cast<size_t>(i)].x);
@@ -999,6 +1097,8 @@ static void BM_Mathf_Quaternion_ToMatrix(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<mathf::Matrix4x4> out(kQuatBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             out[static_cast<size_t>(i)] =
                 mathf::RotationMatrix(d[static_cast<size_t>(i)]);
@@ -1015,6 +1115,8 @@ static void BM_DXMath_Quaternion_ToMatrix(benchmark::State& state) {
     const auto& d = QuatData();
     std::vector<DirectX::XMFLOAT4X4> out(kQuatBatch);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
                 &d[static_cast<size_t>(i)].x);
@@ -1037,6 +1139,8 @@ static void BM_Mathf_Transform_Compose(benchmark::State& state) {
     const mathf::Vector3 scale{1.5f, 2.0f, 0.75f};
     const mathf::Vector3 translation{3.0f, -4.0f, 5.0f};
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             out[static_cast<size_t>(i)] =
                 mathf::Compose(scale, d[static_cast<size_t>(i)], translation);
@@ -1056,6 +1160,8 @@ static void BM_DXMath_Transform_Compose(benchmark::State& state) {
     const DirectX::XMVECTOR translation =
         DirectX::XMVectorSet(3.0f, -4.0f, 5.0f, 0.0f);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
                 &d[static_cast<size_t>(i)].x);
@@ -1097,6 +1203,8 @@ static void BM_Mathf_SinCos(benchmark::State& state) {
     const auto& d = AngleData();
     std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             float s = 0.0f, c = 0.0f;
             mathf::SinCos(d[static_cast<size_t>(i)], s, c);
@@ -1114,6 +1222,8 @@ static void BM_StdLib_SinCos(benchmark::State& state) {
     const auto& d = AngleData();
     std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             out[static_cast<size_t>(i) * 2] = std::sin(d[static_cast<size_t>(i)]);
             out[static_cast<size_t>(i) * 2 + 1] = std::cos(d[static_cast<size_t>(i)]);
@@ -1130,6 +1240,8 @@ static void BM_DXMath_SinCos(benchmark::State& state) {
     const auto& d = AngleData();
     std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
     for (auto _ : state) {
+        // See the note on Anchor(): without this the whole batch hoists out.
+        benchmark::ClobberMemory();
         for (int i = 0; i < kQuatBatch; ++i) {
             float s = 0.0f, c = 0.0f;
             DirectX::XMScalarSinCos(&s, &c, d[static_cast<size_t>(i)]);

@@ -158,11 +158,23 @@ namespace detail {
 // The shared body of all four look-at forms. `forward` must already point the
 // way the convention wants: toward the target for left-handed, away from it for
 // right-handed.
+//
+// Degenerate input -- a zero direction, or an up vector parallel to it --
+// returns the identity, per the library-wide policy (Inverse of a singular
+// matrix, Normalize of a zero vector). Without the guard, Cross(up, f) is the
+// zero vector, Normalize hands the zero back, and the function would return a
+// matrix with two zero basis columns: a camera that silently collapses the
+// scene to a line, discovered a long way from the LookAt call that caused it.
+// Looking straight up with the conventional world up is exactly this case.
+// DirectXMath asserts in debug builds and produces the garbage in release;
+// returning something usable and well-defined is this library's choice.
 MATHF_NODISCARD MATHF_INLINE constexpr Matrix4x4
 LookToImpl(const Vector3& eye, const Vector3& forward,
            const Vector3& up) noexcept {
     const Vector3 f = Normalize(forward);
-    const Vector3 r = Normalize(Cross(up, f));
+    const Vector3 side = Cross(up, f);
+    if (!detail::IsFiniteNonZero(LengthSq(side))) return Matrix4x4::Identity();
+    const Vector3 r = Normalize(side);
     const Vector3 u = Cross(f, r);
 
     // The basis goes in as COLUMNS, because a view matrix is the inverse of the

@@ -155,6 +155,38 @@ TEST(TransformDecompose, FoldsAReflectionIntoNegativeScale) {
     }
 }
 
+// A reflection folded into a matrix that ALSO carries a real rotation -- the
+// pure-mirror test above keeps the rotation at identity, where a sign error in
+// the det<0 fold's interaction with Shepperd's method is invisible. The angle is
+// near pi on purpose, so the quaternion extraction runs a trace<0 branch at the
+// same time. This is Phase 3's identity-times-identity lesson applied here.
+TEST(TransformDecompose, FoldsReflectionCombinedWithRotation) {
+    const struct { Vector3 scale; Vector3 axis; float angle; } cases[] = {
+        {{-2, 3, 4}, {1, 2, 3}, 2.5f},
+        {{2, -3, 4}, {0, 1, 0}, 3.1f},
+        {{2, 3, -4}, {1, 0, 1}, 0.7f},
+        {{-1, -2, -3}, {1, 1, 1}, 2.9f},   // det = -6: odd reflection count
+    };
+    for (const auto& c : cases) {
+        const Quaternion rot = mathf::QuaternionFromAxisAngle(c.axis, c.angle);
+        const Vector3 translation{5, -1, 2};
+        const Matrix4x4 m = mathf::Compose(c.scale, rot, translation);
+
+        Vector3 outScale, outTranslation;
+        Quaternion outRot;
+        ASSERT_TRUE(mathf::Decompose(m, outScale, outRot, outTranslation));
+
+        EXPECT_LT(outScale.x * outScale.y * outScale.z, 0.0f)
+            << "the reflection must survive in the scale's sign";
+        // Which axis carries the mirror is a convention, not a recovery -- the
+        // one thing that must hold is that the parts recompose to the original.
+        EXPECT_TRUE(mathf::NearEqual(
+            mathf::Compose(outScale, outRot, outTranslation), m, 1e-3f))
+            << "scale (" << c.scale.x << "," << c.scale.y << "," << c.scale.z
+            << ") angle " << c.angle;
+    }
+}
+
 // A zero scale destroys the direction of a basis vector; no rotation can be
 // recovered from it, so the function says so instead of guessing.
 TEST(TransformDecompose, RejectsDegenerateMatrices) {
@@ -200,6 +232,27 @@ TEST(TransformView, HandednessDecidesWhichWayTheCameraLooks) {
 
     EXPECT_NEAR(lh.z, 5.0f, 1e-4f) << "left-handed looks down +Z";
     EXPECT_NEAR(rh.z, -5.0f, 1e-4f) << "right-handed looks down -Z";
+}
+
+// Looking straight up with the conventional world up -- an easy real mistake --
+// makes forward parallel to up, the cross collapses, and before the guard this
+// returned a matrix with two zero basis columns that silently flattened the
+// scene. Identity on degenerate input is the library-wide policy (singular
+// Inverse, zero Normalize), and now the view matrices follow it too.
+TEST(TransformView, ParallelUpAndForwardReturnsIdentity) {
+    const Vector3 up{0, 1, 0};
+    EXPECT_TRUE(mathf::LookAtLH(Vector3{0, 0, 0}, Vector3{0, 5, 0}, up) ==
+                Matrix4x4::Identity());
+    EXPECT_TRUE(mathf::LookAtRH(Vector3{0, 0, 0}, Vector3{0, -5, 0}, up) ==
+                Matrix4x4::Identity());
+    EXPECT_TRUE(mathf::LookToLH(Vector3{1, 2, 3}, Vector3{0, -1, 0}, up) ==
+                Matrix4x4::Identity());
+    // A zero direction has no view to describe either.
+    EXPECT_TRUE(mathf::LookToLH(Vector3{1, 2, 3}, Vector3{0, 0, 0}, up) ==
+                Matrix4x4::Identity());
+    // And barely-not-parallel still produces a real view matrix.
+    EXPECT_FALSE(mathf::LookAtLH(Vector3{0, 0, 0}, Vector3{0.01f, 5, 0}, up) ==
+                 Matrix4x4::Identity());
 }
 
 TEST(TransformView, LookAtAndLookToAgree) {
@@ -370,6 +423,43 @@ static_assert(kCompileTimeProj.m[3][3] == 0.0f);
 constexpr Matrix4x4 kCompileTimeView =
     mathf::LookAtLH(Vector3{0, 0, -5}, Vector3{0, 0, 0}, Vector3{0, 1, 0});
 static_assert(kCompileTimeView.m[3][2] > 4.999f);
+
+// The rest of the constexpr surface, proven rather than presumed. Decompose
+// takes out-parameters, so it gets a wrapper function.
+static_assert(mathf::RotationX(0.5f)(1, 1) > 0.87f);
+static_assert(mathf::RotationY(0.5f)(0, 0) > 0.87f);
+static_assert(mathf::RotationZ(0.5f)(0, 1) > 0.47f);
+static_assert(mathf::ScalingMatrix(2.0f)(2, 2) == 2.0f);
+static_assert(mathf::LookAtRH(Vector3{0, 0, -5}, Vector3{}, Vector3{0, 1, 0})
+                  .m[2][2] < 0.0f);
+static_assert(mathf::LookToLH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0}) ==
+              Matrix4x4::Identity());
+// RH negates the direction on the way in, so looking along +Z puts -1 in the
+// basis -- the entry that distinguishes it from the LH form given the same
+// direction.
+static_assert(mathf::LookToRH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0})
+                  .m[2][2] < 0.0f);
+static_assert(mathf::LookToLH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0})
+                  .m[2][2] > 0.0f);
+static_assert(mathf::OrthographicLH(4, 4, 1, 10)(0, 0) == 0.5f);
+static_assert(mathf::OrthographicRH(4, 4, 1, 10)(2, 2) < 0.0f);
+static_assert(mathf::OrthographicOffCenterLH(-1, 7, 2, 8, 1, 11)(3, 0) == -0.75f);
+static_assert(mathf::OrthographicOffCenterRH(-1, 7, 2, 8, 1, 11)(0, 0) == 0.25f);
+static_assert(mathf::PerspectiveLH(2, 2, 1, 100)(0, 0) == 1.0f);
+static_assert(mathf::PerspectiveRH(2, 2, 1, 100)(2, 3) == -1.0f);
+
+namespace {
+constexpr float CompileTimeDecompose() {
+    Vector3 scale, translation;
+    Quaternion rot;
+    const bool ok = mathf::Decompose(
+        mathf::Compose(Vector3{2, 3, 4}, Quaternion::Identity(),
+                       Vector3{5, 6, 7}),
+        scale, rot, translation);
+    return ok ? scale.y + translation.z : -1.0f;   // 3 + 7
+}
+} // namespace
+static_assert(CompileTimeDecompose() == 10.0f);
 
 // In ULP, for the reason given on the quaternion version: Clang may fuse a
 // multiply-add at run time that constant evaluation computed unfused.

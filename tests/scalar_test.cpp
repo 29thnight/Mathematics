@@ -127,6 +127,23 @@ TEST(Scalar, TangentTracksTheRatio) {
     }
 }
 
+// Swept right up to the |x| < 1.5 the header claims, not just the comfortable
+// middle: near the pole the cosine underneath is smallest and the division is
+// most sensitive, which is exactly where an accuracy claim quietly dies.
+TEST(Scalar, TangentAccuracyHoldsToTheClaimedBoundary) {
+    double worstRel = 0.0, at = 0.0;
+    for (double x = 1.40; x <= 1.499; x += 0.0005) {
+        for (double sign : {1.0, -1.0}) {
+            const float xf = static_cast<float>(x * sign);
+            const double ref = std::tan(static_cast<double>(xf));
+            const double rel =
+                std::abs(static_cast<double>(mathf::Tan(xf)) - ref) / std::abs(ref);
+            if (rel > worstRel) { worstRel = rel; at = x * sign; }
+        }
+    }
+    EXPECT_LT(worstRel, 3e-6) << "worst at x = " << at;
+}
+
 // --------------------------------------------------------------- inverse trig
 // The reference is evaluated at the FLOAT argument, not at the double loop
 // variable. Rounding x to float moves it by up to 6e-08, and near +/-1 the arc
@@ -188,6 +205,50 @@ TEST(Scalar, ArcTangent2CoversEveryQuadrant) {
             std::abs(static_cast<double>(mathf::ATan2(y, x)) - ref));
     }
     EXPECT_LT(worst, 8e-7);
+}
+
+// Both arguments infinite: inf/inf is NaN by IEEE-754, so the general path's
+// division cannot express these -- they went through ATan's NaN guard and came
+// back NaN while std::atan2 defines all four as quadrant diagonals. Found in the
+// Phase 4 code review; the fix is an explicit branch, and this pins it.
+TEST(Scalar, ArcTangent2WithBothArgumentsInfinite) {
+    const float inf = std::numeric_limits<float>::infinity();
+    EXPECT_NEAR(mathf::ATan2(inf, inf), mathf::kQuarterPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(inf, -inf), 3.0f * mathf::kQuarterPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(-inf, inf), -mathf::kQuarterPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(-inf, -inf), -3.0f * mathf::kQuarterPi, 1e-6f);
+
+    // One argument infinite keeps working through the ordinary division.
+    EXPECT_NEAR(mathf::ATan2(inf, 5.0f), mathf::kHalfPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(-inf, 5.0f), -mathf::kHalfPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(3.0f, -inf), mathf::kPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(-3.0f, -inf), -mathf::kPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(3.0f, inf), 0.0f, 1e-6f);
+}
+
+// Magnitude ratios whose division overflows to infinity or underflows to zero.
+// Both must land on the axis answers, not on garbage from the intermediate.
+TEST(Scalar, ArcTangent2ExtremeMagnitudeRatios) {
+    EXPECT_NEAR(mathf::ATan2(1e30f, 1e-30f), mathf::kHalfPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(-1e30f, 1e-30f), -mathf::kHalfPi, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(1e-30f, 1e30f), 0.0f, 1e-6f);
+    EXPECT_NEAR(mathf::ATan2(1e-30f, -1e30f), mathf::kPi, 1e-6f);
+}
+
+// The sign of a zero is data: asin(-0) is -0 per the C library, and losing it
+// flips which side of the branch cut ATan2 lands on. AbsScalar originally used
+// `x < 0 ? -x : x`, which hands -0.0f back unchanged because the two zeros
+// compare equal -- the bitwise form and the early returns are what these pin.
+TEST(Scalar, SignedZeroSurvivesTheInverseFunctions) {
+    EXPECT_TRUE(std::signbit(mathf::ASin(-0.0f)));
+    EXPECT_FALSE(std::signbit(mathf::ASin(0.0f)));
+    EXPECT_TRUE(std::signbit(mathf::ATan(-0.0f)));
+    EXPECT_FALSE(std::signbit(mathf::ATan(0.0f)));
+    EXPECT_TRUE(std::signbit(mathf::ATan2(-0.0f, 1.0f)))
+        << "atan2(-0, +x) must be -0, matching std::atan2";
+    EXPECT_FALSE(std::signbit(mathf::ATan2(0.0f, 1.0f)));
+    EXPECT_TRUE(std::signbit(mathf::ATan2(-3.0f, std::numeric_limits<float>::infinity())))
+        << "a negative y over +inf divides to -0 and must stay negative";
 }
 
 TEST(Scalar, ArcTangent2OnTheAxes) {
@@ -265,6 +326,13 @@ TEST(Scalar, InverseTrigCompileTimeMatchesRuntimeToWithinOneUlp) {
 // Usable in a constant expression at all -- the whole point of not calling
 // <cmath> here.
 static_assert(mathf::Sin(0.0f) == 0.0f);
+// Angles past pi/2, so the reduction's fold branches run during constant
+// evaluation too -- kQuarterPi alone never leaves the no-fold path.
+static_assert(mathf::Cos(mathf::kPi) < -0.9999f);
+static_assert(mathf::Cos(-mathf::kPi) < -0.9999f);
+static_assert(mathf::Sin(3.0f) > 0.14f && mathf::Sin(3.0f) < 0.15f);
+static_assert(mathf::Sin(-3.0f) < -0.14f);
+static_assert(mathf::ATan2(1.0f, 1.0f) > 0.78f);
 static_assert(mathf::Cos(0.0f) == 1.0f);
 static_assert(mathf::ACos(1.0f) == 0.0f);
 static_assert(mathf::ATan2(1.0f, 0.0f) == mathf::kHalfPi);

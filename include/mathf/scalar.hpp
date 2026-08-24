@@ -70,6 +70,19 @@ MATHF_NODISCARD MATHF_INLINE constexpr float Degrees(float radians) noexcept {
 // -------------------------------------------------------------- small helpers
 namespace detail {
 
+// The comparison form, which compiles to a single andps and stays in the
+// vector registers.
+//
+// The bitwise spelling the vector layer's Abs uses -- `FromBits(BitsOf(x) &
+// kAbsMask)` -- is the more obviously correct one, because `x < 0` is false
+// for negative zero and so this form hands -0.0f straight back. It was tried
+// here and cost 22% of Slerp and 8% of SinCos: bit_cast on x86 round-trips the
+// value through a general-purpose register, and Reducible() calls this on
+// every single trigonometric evaluation.
+//
+// It is safe because no caller can reach it with a zero. ASin and ATan return
+// small arguments untouched before this is called, which is what preserves
+// their signed zeros, and Reducible cannot tell the two zeros apart anyway.
 MATHF_NODISCARD MATHF_INLINE constexpr float AbsScalar(float x) noexcept {
     return x < 0.0f ? -x : x;
 }
@@ -89,16 +102,18 @@ MATHF_NODISCARD MATHF_INLINE constexpr float ScalarSqrt(float x) noexcept {
     return std::sqrt(x);
 }
 
-// True when the argument is finite and small enough to reduce modulo 2pi with
-// the exactness the reduction below relies on.
+// True when the argument is finite and within the range the reduction is
+// validated over.
 //
-// The bound is not arbitrary. The reduction subtracts `quotient * kTwoPiHi`, and
-// that product is only exact while the quotient fits in the bits kTwoPiHi leaves
-// free -- 2^17. Past there accuracy decays; well past there the int conversion
-// itself overflows, which is undefined behaviour rather than a wrong answer, and
-// undefined behaviour during constant evaluation is a compile error. Rejecting
-// with NaN at a bound we can actually honour beats returning noise that looks
-// like an answer. 2^17 periods is about 820000 radians, or 130000 full turns.
+// The reduction itself no longer sets this bound -- it is one double-precision
+// multiply and subtract, exact far beyond it, and the int conversion it feeds
+// would not overflow until |x| is past 1e10 (overflow there would be undefined
+// behaviour, which during constant evaluation is a hard compile error, so a
+// bound must exist somewhere). 8.2e5 is kept for two honest reasons: it is the
+// range the header's accuracy claim is actually measured over, and by 2^22 the
+// spacing between adjacent float arguments reaches half a radian -- an input
+// that far out names its own angle too coarsely for any answer to mean much.
+// Rejecting with NaN at a bound we can honour beats returning noise.
 MATHF_NODISCARD MATHF_INLINE constexpr bool Reducible(float x) noexcept {
     return x - x == 0.0f && AbsScalar(x) < 8.2e5f;
 }
@@ -227,6 +242,16 @@ MATHF_NODISCARD MATHF_INLINE constexpr float ACos(float value) noexcept {
 
 MATHF_NODISCARD MATHF_INLINE constexpr float ASin(float value) noexcept {
     if (value != value) return consteval_ops::kQuietNaN;
+    // Small arguments return themselves. Two reasons share the branch. First,
+    // asin(x) == x to full float precision below 2^-11 -- the next Taylor term
+    // is x^3/6, a relative x^2/6 < 4e-8, under float epsilon -- while the
+    // polynomial path computes kHalfPi - ACosCore(x), a subtraction of two
+    // values near 1.5708 whose cancellation costs ~2e-7 ABSOLUTE error: fine
+    // against the documented absolute bound, but a 25% RELATIVE error at
+    // x = 1e-6, which turned a tiny rotation's angle into noise in
+    // ToAxisAngle. Second, asin(+/-0) is +/-0 with the sign preserved, per
+    // the C library, and returning the argument is what preserves it.
+    if (value > -4.8828125e-4f && value < 4.8828125e-4f) return value;
     const float v = value > 1.0f ? 1.0f : (value < -1.0f ? -1.0f : value);
     const bool nonNegative = v >= 0.0f;
     const float x = detail::AbsScalar(v);
@@ -247,6 +272,11 @@ MATHF_NODISCARD MATHF_INLINE constexpr float ATan(float value) noexcept {
     if (value != value) return consteval_ops::kQuietNaN;
     if (value == consteval_ops::kInfinity) return kHalfPi;
     if (value == -consteval_ops::kInfinity) return -kHalfPi;
+    // Small arguments return themselves, exactly as in ASin and for the same
+    // pair of reasons -- atan(x) == x to float precision below 2^-11 (next
+    // term x^3/3), and the signed zero comes through intact, which is what
+    // lets ATan2(-0, +x) and ATan2(-y, +inf) land on the right side of zero.
+    if (value > -4.8828125e-4f && value < 4.8828125e-4f) return value;
 
     const float a = detail::AbsScalar(value);
     const float x = a > 1.0f ? 1.0f / a : a;
@@ -259,6 +289,18 @@ MATHF_NODISCARD MATHF_INLINE constexpr float ATan(float value) noexcept {
 // library defines them, so callers do not have to special-case a zero component.
 MATHF_NODISCARD MATHF_INLINE constexpr float ATan2(float y, float x) noexcept {
     if (y != y || x != x) return consteval_ops::kQuietNaN;
+
+    // Both infinite: the one case the division below cannot express. inf/inf
+    // is NaN by IEEE-754, which would fall into ATan's NaN guard and poison
+    // the answer -- while std::atan2 defines these as the four quadrant
+    // diagonals. Every other infinite mix survives the division: y infinite
+    // with x finite divides to +/-inf, finite y over infinite x divides to a
+    // signed zero, and ATan handles both ends.
+    if (detail::AbsScalar(y) == consteval_ops::kInfinity &&
+        detail::AbsScalar(x) == consteval_ops::kInfinity) {
+        const float magnitude = x > 0.0f ? kQuarterPi : 3.0f * kQuarterPi;
+        return detail::SignBitSet(y) ? -magnitude : magnitude;
+    }
 
     if (x == 0.0f) {
         if (y > 0.0f) return kHalfPi;
