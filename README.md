@@ -223,14 +223,11 @@ scripts\open_vs.bat
 
 ## 대표 성능
 
-아래 값은 Intel Core i7-8700K, MSVC C++23, AVX2/FMA 환경에서 얻은 기준선이다.
-절대 수치보다 동일 머신·동일 컴파일러에서의 상대 비교를 봐야 한다.
+아래 도표는 Intel Core i7-8700K, MSVC C++23, AVX2/FMA 환경에서 Mathematics,
+DirectXMath, GLM, Vectormath를 같은 하니스로 측정한 결과다. 절대 수치보다 동일
+머신·동일 컴파일러에서의 상대 비교를 봐야 한다. 이미지를 누르면 원본 크기로 볼 수 있다.
 
-| 연산 | Mathematics | DirectXMath | GLM | Vectormath |
-|------|-------------|-------------|-----|------------|
-| `mul_add` 지연 | 2.25 ns | 2.25 ns | 2.25 ns | 2.31 ns |
-| `dot4` 지연 | 4.42 ns | 4.40 ns | — | — |
-| `mul_add` 처리량 | 976 M/s | 968 M/s | 586 M/s | 982 M/s |
+[![Mathematics와 DirectXMath, GLM, Vectormath 성능 비교](docs/assets/performance-comparison.png)](docs/assets/performance-comparison.png)
 
 재현 명령, 전체 표, 컴파일러별 차이와 알려진 clang-cl 행렬 곱 병목은
 [BASELINE](docs/BASELINE.md)에 기록돼 있다. 저수준 코드 생성 비교는
