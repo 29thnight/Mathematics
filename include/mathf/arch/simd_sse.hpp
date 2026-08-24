@@ -79,6 +79,19 @@ MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadAligned(const float* p) noexc
     return VecReg{_mm_load_ps(p)};
 }
 
+// Reads one float and broadcasts it, in a single instruction where AVX is
+// available. This is not the same as Load followed by SplatX: the shuffle form
+// occupies the shuffle port, and a matrix multiply issues sixteen of them, which
+// makes that port -- not the arithmetic -- the bottleneck. Broadcasting straight
+// from memory moves the work to the load port and leaves the shuffle port free.
+MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadSplat(const float* p) noexcept {
+#if MATHF_HAS_AVX
+    return VecReg{_mm_broadcast_ss(p)};
+#else
+    return VecReg{_mm_load_ps1(p)};
+#endif
+}
+
 MATHF_INLINE void MATHF_CALL Store(float* p, VecReg a) noexcept {
     _mm_storeu_ps(p, a.v);
 }

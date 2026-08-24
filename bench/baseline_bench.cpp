@@ -9,6 +9,7 @@
 // Release gate (docs/PLAN.md §4.2): Mathf must be within +-5% of DirectXMath on
 // every mapped operation. Run with --benchmark_repetitions=5 for stable numbers.
 
+#include <mathf/matrix.hpp>
 #include <mathf/vec_reg.hpp>
 #include <mathf/vector.hpp>
 
@@ -521,6 +522,175 @@ static void BM_GLM_Vector3_Normalize_Throughput(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * kVec3Batch);
 }
 BENCHMARK(BM_GLM_Vector3_Normalize_Throughput);
+#endif
+
+// ============================================== Matrix4x4 multiply and inverse
+// The Phase 3 gate. A quarter turn about Z is the multiplier: it is orthonormal,
+// so a self-feeding chain cycles with period four instead of growing without
+// bound, and it is not the identity, which a compiler could fold away.
+namespace {
+
+constexpr mathf::Matrix4x4 kQuarterTurnZ{ 0, 1, 0, 0,
+                                         -1, 0, 0, 0,
+                                          0, 0, 1, 0,
+                                          0, 0, 0, 1};
+
+constexpr int kMatrixBatch = 256;
+
+const std::vector<mathf::Matrix4x4>& MatrixData() {
+    static const std::vector<mathf::Matrix4x4> data = [] {
+        std::mt19937 rng(kSeed);
+        std::uniform_real_distribution<float> dist(-10.0f, 10.0f);
+        std::vector<mathf::Matrix4x4> out(kMatrixBatch);
+        for (auto& mat : out) {
+            for (int i = 0; i < 4; ++i) {
+                for (int j = 0; j < 4; ++j) mat.m[i][j] = dist(rng);
+                mat.m[i][i] += 40.0f;   // keep them comfortably invertible
+            }
+        }
+        return out;
+    }();
+    return data;
+}
+
+} // namespace
+
+static void BM_Mathf_Matrix4x4_Multiply_Latency(benchmark::State& state) {
+    mathf::Matrix4x4 acc = mathf::Matrix4x4::Identity();
+    for (auto _ : state) {
+        acc = acc * kQuarterTurnZ;
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (std::abs(acc.m[0][0]) > 1.5f) state.SkipWithError("accumulator drifted");
+}
+BENCHMARK(BM_Mathf_Matrix4x4_Multiply_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Matrix4x4_Multiply_Latency(benchmark::State& state) {
+    DirectX::XMMATRIX acc = DirectX::XMMatrixIdentity();
+    const DirectX::XMMATRIX b = DirectX::XMMatrixSet(
+        0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    for (auto _ : state) {
+        acc = DirectX::XMMatrixMultiply(acc, b);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+}
+BENCHMARK(BM_DXMath_Matrix4x4_Multiply_Latency);
+#endif
+
+static void BM_Mathf_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<mathf::Matrix4x4> out(kMatrixBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch / 2; ++i) {
+            out[static_cast<size_t>(i)] =
+                d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + kMatrixBatch / 2)];
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kMatrixBatch / 2));
+}
+BENCHMARK(BM_Mathf_Matrix4x4_Multiply_Throughput);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<DirectX::XMFLOAT4X4> out(kMatrixBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch / 2; ++i) {
+            const auto* qa = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
+                &d[static_cast<size_t>(i)].m[0][0]);
+            const auto* qb = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
+                &d[static_cast<size_t>(i + kMatrixBatch / 2)].m[0][0]);
+            DirectX::XMStoreFloat4x4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(qa),
+                                          DirectX::XMLoadFloat4x4(qb)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kMatrixBatch / 2));
+}
+BENCHMARK(BM_DXMath_Matrix4x4_Multiply_Throughput);
+#endif
+
+#if MATHF_BENCH_HAS_GLM
+// GLM is column-major with column vectors, so its product is not numerically the
+// same as ours for the same stored bytes. The instruction count is, which is all
+// this measures.
+static void BM_GLM_Matrix4x4_Multiply_Throughput(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<glm::mat4> out(kMatrixBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch / 2; ++i) {
+            const auto& a = *reinterpret_cast<const glm::mat4*>(
+                &d[static_cast<size_t>(i)].m[0][0]);
+            const auto& b = *reinterpret_cast<const glm::mat4*>(
+                &d[static_cast<size_t>(i + kMatrixBatch / 2)].m[0][0]);
+            out[static_cast<size_t>(i)] = a * b;
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kMatrixBatch / 2));
+}
+BENCHMARK(BM_GLM_Matrix4x4_Multiply_Throughput);
+#endif
+
+static void BM_Mathf_Matrix4x4_Inverse(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<mathf::Matrix4x4> out(kMatrixBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch; ++i) {
+            out[static_cast<size_t>(i)] = mathf::Inverse(d[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kMatrixBatch);
+}
+BENCHMARK(BM_Mathf_Matrix4x4_Inverse);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Matrix4x4_Inverse(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<DirectX::XMFLOAT4X4> out(kMatrixBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch; ++i) {
+            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
+                &d[static_cast<size_t>(i)].m[0][0]);
+            DirectX::XMStoreFloat4x4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMMatrixInverse(nullptr, DirectX::XMLoadFloat4x4(q)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kMatrixBatch);
+}
+BENCHMARK(BM_DXMath_Matrix4x4_Inverse);
+#endif
+
+#if MATHF_BENCH_HAS_GLM
+static void BM_GLM_Matrix4x4_Inverse(benchmark::State& state) {
+    const auto& d = MatrixData();
+    std::vector<glm::mat4> out(kMatrixBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kMatrixBatch; ++i) {
+            const auto& a = *reinterpret_cast<const glm::mat4*>(
+                &d[static_cast<size_t>(i)].m[0][0]);
+            out[static_cast<size_t>(i)] = glm::inverse(a);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kMatrixBatch);
+}
+BENCHMARK(BM_GLM_Matrix4x4_Inverse);
 #endif
 
 // ========================================================== throughput: MulAdd

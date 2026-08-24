@@ -44,6 +44,10 @@ MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadAligned(const float* p) noexc
     return Load(p);
 }
 
+MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadSplat(const float* p) noexcept {
+    return MakeReg(*p, *p, *p, *p);
+}
+
 MATHF_INLINE void MATHF_CALL Store(float* p, VecReg a) noexcept {
     p[0] = Lane(a, 0);
     p[1] = Lane(a, 1);

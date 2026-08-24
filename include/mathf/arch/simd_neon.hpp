@@ -65,6 +65,13 @@ MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadAligned(const float* p) noexc
     return VecReg{vld1q_f32(p)};
 }
 
+// Load-and-broadcast in one instruction. See the note on the SSE version: it
+// exists so a matrix multiply does not spend sixteen operations on the shuffle
+// unit when the values it needs are already addressable in memory.
+MATHF_NODISCARD MATHF_INLINE VecReg MATHF_CALL LoadSplat(const float* p) noexcept {
+    return VecReg{vld1q_dup_f32(p)};
+}
+
 MATHF_INLINE void MATHF_CALL Store(float* p, VecReg a) noexcept {
     vst1q_f32(p, a.v);
 }

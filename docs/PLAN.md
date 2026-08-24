@@ -337,10 +337,24 @@ SimpleMath의 `Vector3`에 가까운 이름이 사용자에게 익숙하다.
 
 핫 루프에서 함수 경계를 넘나드는 코드는 여전히 `VecReg`를 직접 쓴다.
 
-### Phase 3 — 행렬
-- [ ] `Mat4` (mul/transpose/inverse/determinant), `Mat3`
-- [ ] mat4 mul은 shuffle+FMA 수동 최적화 (DXMath `XMMatrixMultiply` 대응)
-- 완료 기준: DXMath 골든 테스트 통과, mat4 mul 벤치 합격
+### Phase 3 — 행렬 — **대체로 완료 (2026-08-24), 역행렬 성능만 미완**
+- [x] `Matrix4x4`, `Matrix3x3` — row-major, row-vector (DXMath 관례)
+- [x] 곱셈·전치·행렬식·역행렬·`v * M`·`TransformPoint`/`TransformDirection`
+- [x] 테스트 31개 추가 (총 116개). **관례 자체를 DXMath와 대조**한다 —
+      저장 순서, 행벡터, 합성 순서, 이동 성분 위치를 각각 고정
+- [x] mat4 곱셈 벤치 **합격 (MSVC)**: 지연 5.83ns 대 6.10, 처리량 334 대 307 M/s
+- [ ] **역행렬 벤치 미달**: MSVC에서 38%, clang에서 9% 뒤진다. 우리 구현은 스칼라,
+      DXMath는 SIMD. → **SIMD 역행렬이 Phase 3의 남은 과제**
+- [ ] clang의 곱셈 처리량도 32% 뒤진다 (MSVC에서는 앞섬). 원인 미규명
+
+**Phase 3에서 얻은 규칙**
+1. **`SplatX/Y/Z/W`는 셔플 포트를 먹는다.** 행렬 곱셈처럼 브로드캐스트가 16개
+   필요한 곳에서는 셔플 포트(1개)가 FMA보다 먼저 포화된다. 값이 메모리에 있다면
+   `LoadSplat`으로 적재 포트에 넘겨야 한다 (141 → 251 M/s).
+2. **128비트만으로는 못 따라잡는 지점이 있다.** DXMath의 `XMMatrixMultiply`는
+   AVX2 256비트로 두 행을 동시에 처리한다. 알고리즘이 절반의 연산을 하면 조율로는
+   메울 수 없다 (251 → 334 M/s). 경쟁 대상의 구현을 읽어보는 것이 추측보다 빨랐다.
+3. 런타임 인덱스 루프는 결과를 스택으로 밀어낸다. 행 단위 연산은 언롤한다.
 
 ### Phase 4 — 쿼터니언 & 변환
 - [ ] `Quat`: mul/conjugate/inverse/slerp/nlerp/축각/오일러/행렬 변환
