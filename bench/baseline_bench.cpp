@@ -10,6 +10,7 @@
 // every mapped operation. Run with --benchmark_repetitions=5 for stable numbers.
 
 #include <mathf/matrix.hpp>
+#include <mathf/transform.hpp>
 #include <mathf/vec_reg.hpp>
 #include <mathf/vector.hpp>
 
@@ -780,6 +781,367 @@ static void BM_Vectormath_MulAdd_Throughput(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * kBatch);
 }
 BENCHMARK(BM_Vectormath_MulAdd_Throughput);
+#endif
+
+// ============================================================ quaternion (Phase 4)
+namespace {
+
+constexpr int kQuatBatch = 256;
+
+const std::vector<mathf::Quaternion>& QuatData() {
+    static const std::vector<mathf::Quaternion> data = [] {
+        std::mt19937 rng(kSeed + 5);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        std::vector<mathf::Quaternion> out(kQuatBatch);
+        for (auto& q : out) {
+            // Unit quaternions, which is what every consumer of these expects.
+            const mathf::Vector3 axis{dist(rng), dist(rng), dist(rng) + 1.5f};
+            q = mathf::QuaternionFromAxisAngle(axis, dist(rng) * 3.0f);
+        }
+        return out;
+    }();
+    return data;
+}
+
+// A numeric fixed point for the latency chains, the same trick the MulAdd chain
+// above needs: a half turn about Z is exactly (0, 0, 1, 0), and composing it
+// walks a four-state cycle whose every component is exactly 0 or +/-1. Nothing
+// rounds, so the accumulator cannot drift off the unit sphere over hundreds of
+// millions of products -- and a drifting accumulator does not merely spoil the
+// answer, it lands in denormals and times microcode assists instead of the
+// instruction under test. A small angle was tried first and drifted out of range
+// within one run.
+const mathf::Quaternion kHalfTurnZ{0.0f, 0.0f, 1.0f, 0.0f};
+
+} // namespace
+
+static void BM_Mathf_Quaternion_Multiply_Latency(benchmark::State& state) {
+    mathf::Quaternion acc = mathf::Quaternion::Identity();
+    for (auto _ : state) {
+        acc = acc * kHalfTurnZ;
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    if (!(mathf::Length(acc) > 0.99f && mathf::Length(acc) < 1.01f)) {
+        state.SkipWithError("accumulator drifted off the unit sphere");
+    }
+}
+BENCHMARK(BM_Mathf_Quaternion_Multiply_Latency);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Quaternion_Multiply_Latency(benchmark::State& state) {
+    const DirectX::XMVECTOR turn = DirectX::XMVectorSet(
+        kHalfTurnZ.x, kHalfTurnZ.y, kHalfTurnZ.z, kHalfTurnZ.w);
+    DirectX::XMVECTOR acc = DirectX::XMQuaternionIdentity();
+    for (auto _ : state) {
+        acc = DirectX::XMQuaternionMultiply(acc, turn);
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+    const float length =
+        DirectX::XMVectorGetX(DirectX::XMQuaternionLength(acc));
+    if (!(length > 0.99f && length < 1.01f)) {
+        state.SkipWithError("accumulator drifted off the unit sphere");
+    }
+}
+BENCHMARK(BM_DXMath_Quaternion_Multiply_Latency);
+#endif
+
+#if MATHF_BENCH_HAS_DXMATH
+// The same chain, but with DirectXMath holding its accumulator in XMFLOAT4
+// storage instead of an XMVECTOR register.
+//
+// This is the fair comparison, and the reason the one above is not: Mathf's
+// Quaternion is a packed sixteen-byte struct, so every link of the chain stores
+// the result and loads it back, while an XMVECTOR accumulator never leaves a
+// register. Phase 2 hit the same asymmetry with Vector3 against XMVECTOR and
+// XMFLOAT3, and the answer there was to measure both rather than pick whichever
+// one flattered. Throughput does not care -- the stores pipeline -- which is why
+// the batch numbers match and these do not.
+static void BM_DXMath_Quaternion_Multiply_Latency_Packed(benchmark::State& state) {
+    const DirectX::XMVECTOR turn = DirectX::XMVectorSet(
+        kHalfTurnZ.x, kHalfTurnZ.y, kHalfTurnZ.z, kHalfTurnZ.w);
+    DirectX::XMFLOAT4 acc{0.0f, 0.0f, 0.0f, 1.0f};
+    for (auto _ : state) {
+        DirectX::XMStoreFloat4(
+            &acc, DirectX::XMQuaternionMultiply(DirectX::XMLoadFloat4(&acc), turn));
+        benchmark::DoNotOptimize(acc);
+    }
+    benchmark::ClobberMemory();
+}
+BENCHMARK(BM_DXMath_Quaternion_Multiply_Latency_Packed);
+#endif
+
+static void BM_Mathf_Quaternion_Multiply_Throughput(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<mathf::Quaternion> out(kQuatBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch / 2; ++i) {
+            out[static_cast<size_t>(i)] =
+                d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + kQuatBatch / 2)];
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kQuatBatch / 2));
+}
+BENCHMARK(BM_Mathf_Quaternion_Multiply_Throughput);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Quaternion_Multiply_Throughput(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<DirectX::XMFLOAT4> out(kQuatBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch / 2; ++i) {
+            const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i)].x);
+            const auto* b = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i + kQuatBatch / 2)].x);
+            DirectX::XMStoreFloat4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMQuaternionMultiply(DirectX::XMLoadFloat4(a),
+                                              DirectX::XMLoadFloat4(b)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kQuatBatch / 2));
+}
+BENCHMARK(BM_DXMath_Quaternion_Multiply_Throughput);
+#endif
+
+static void BM_Mathf_Quaternion_Slerp(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<mathf::Quaternion> out(kQuatBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch / 2; ++i) {
+            out[static_cast<size_t>(i)] =
+                mathf::Slerp(d[static_cast<size_t>(i)],
+                             d[static_cast<size_t>(i + kQuatBatch / 2)], 0.37f);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kQuatBatch / 2));
+}
+BENCHMARK(BM_Mathf_Quaternion_Slerp);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Quaternion_Slerp(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<DirectX::XMFLOAT4> out(kQuatBatch / 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch / 2; ++i) {
+            const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i)].x);
+            const auto* b = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i + kQuatBatch / 2)].x);
+            DirectX::XMStoreFloat4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMQuaternionSlerp(DirectX::XMLoadFloat4(a),
+                                           DirectX::XMLoadFloat4(b), 0.37f));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * (kQuatBatch / 2));
+}
+BENCHMARK(BM_DXMath_Quaternion_Slerp);
+#endif
+
+// Rotating a vector by a quaternion, which is what a skinning or particle
+// system actually spends its time on.
+static void BM_Mathf_Quaternion_RotateVector(benchmark::State& state) {
+    const auto& d = QuatData();
+    const auto& v = Data();
+    std::vector<mathf::Vector3> out(kQuatBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            const mathf::Vector3 p{v[static_cast<size_t>(i)].v[0],
+                                   v[static_cast<size_t>(i)].v[1],
+                                   v[static_cast<size_t>(i)].v[2]};
+            out[static_cast<size_t>(i)] =
+                mathf::Rotate(p, d[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_Mathf_Quaternion_RotateVector);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Quaternion_RotateVector(benchmark::State& state) {
+    const auto& d = QuatData();
+    const auto& v = Data();
+    std::vector<DirectX::XMFLOAT3> out(kQuatBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i)].x);
+            const DirectX::XMVECTOR p = DirectX::XMVectorSet(
+                v[static_cast<size_t>(i)].v[0], v[static_cast<size_t>(i)].v[1],
+                v[static_cast<size_t>(i)].v[2], 0.0f);
+            DirectX::XMStoreFloat3(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMVector3Rotate(p, DirectX::XMLoadFloat4(q)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_DXMath_Quaternion_RotateVector);
+#endif
+
+// Quaternion to matrix -- once per object per frame in any scene graph.
+static void BM_Mathf_Quaternion_ToMatrix(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<mathf::Matrix4x4> out(kQuatBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            out[static_cast<size_t>(i)] =
+                mathf::RotationMatrix(d[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_Mathf_Quaternion_ToMatrix);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Quaternion_ToMatrix(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<DirectX::XMFLOAT4X4> out(kQuatBatch);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i)].x);
+            DirectX::XMStoreFloat4x4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(q)));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_DXMath_Quaternion_ToMatrix);
+#endif
+
+// The full TRS build, which is the per-object cost in a scene graph.
+static void BM_Mathf_Transform_Compose(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<mathf::Matrix4x4> out(kQuatBatch);
+    const mathf::Vector3 scale{1.5f, 2.0f, 0.75f};
+    const mathf::Vector3 translation{3.0f, -4.0f, 5.0f};
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            out[static_cast<size_t>(i)] =
+                mathf::Compose(scale, d[static_cast<size_t>(i)], translation);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_Mathf_Transform_Compose);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_Transform_Compose(benchmark::State& state) {
+    const auto& d = QuatData();
+    std::vector<DirectX::XMFLOAT4X4> out(kQuatBatch);
+    const DirectX::XMVECTOR scale = DirectX::XMVectorSet(1.5f, 2.0f, 0.75f, 0.0f);
+    const DirectX::XMVECTOR translation =
+        DirectX::XMVectorSet(3.0f, -4.0f, 5.0f, 0.0f);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
+                &d[static_cast<size_t>(i)].x);
+            DirectX::XMStoreFloat4x4(
+                &out[static_cast<size_t>(i)],
+                DirectX::XMMatrixAffineTransformation(
+                    scale, DirectX::XMVectorZero(), DirectX::XMLoadFloat4(q),
+                    translation));
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_DXMath_Transform_Compose);
+#endif
+
+// ---------------------------------------------------- scalar transcendentals
+// Mathf's Sin is a minimax polynomial rather than a call into <cmath>, because
+// it has to be constant-evaluable. That is a design constraint, not a
+// performance claim -- these two benchmarks are what says whether the constraint
+// also happened to cost anything.
+namespace {
+
+const std::vector<float>& AngleData() {
+    static const std::vector<float> data = [] {
+        std::mt19937 rng(kSeed + 6);
+        std::uniform_real_distribution<float> dist(-20.0f, 20.0f);
+        std::vector<float> out(kQuatBatch);
+        for (auto& a : out) a = dist(rng);
+        return out;
+    }();
+    return data;
+}
+
+} // namespace
+
+static void BM_Mathf_SinCos(benchmark::State& state) {
+    const auto& d = AngleData();
+    std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            float s = 0.0f, c = 0.0f;
+            mathf::SinCos(d[static_cast<size_t>(i)], s, c);
+            out[static_cast<size_t>(i) * 2] = s;
+            out[static_cast<size_t>(i) * 2 + 1] = c;
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_Mathf_SinCos);
+
+static void BM_StdLib_SinCos(benchmark::State& state) {
+    const auto& d = AngleData();
+    std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            out[static_cast<size_t>(i) * 2] = std::sin(d[static_cast<size_t>(i)]);
+            out[static_cast<size_t>(i) * 2 + 1] = std::cos(d[static_cast<size_t>(i)]);
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_StdLib_SinCos);
+
+#if MATHF_BENCH_HAS_DXMATH
+static void BM_DXMath_SinCos(benchmark::State& state) {
+    const auto& d = AngleData();
+    std::vector<float> out(static_cast<size_t>(kQuatBatch) * 2);
+    for (auto _ : state) {
+        for (int i = 0; i < kQuatBatch; ++i) {
+            float s = 0.0f, c = 0.0f;
+            DirectX::XMScalarSinCos(&s, &c, d[static_cast<size_t>(i)]);
+            out[static_cast<size_t>(i) * 2] = s;
+            out[static_cast<size_t>(i) * 2 + 1] = c;
+        }
+        benchmark::DoNotOptimize(out.data());
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations() * kQuatBatch);
+}
+BENCHMARK(BM_DXMath_SinCos);
 #endif
 
 BENCHMARK_MAIN();

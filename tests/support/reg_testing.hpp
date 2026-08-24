@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <random>
 #include <string>
 
@@ -78,6 +79,47 @@ inline ::testing::AssertionResult NearEqual(VecReg actual, VecReg expected,
         }
     }
     return ::testing::AssertionSuccess();
+}
+
+// Distance in representable floats. The right unit for "are these the same
+// answer computed two ways": an absolute epsilon means different things at
+// different magnitudes, and exact equality is too strong wherever one of the two
+// paths is allowed to contract a multiply-add into an FMA and the other is not.
+inline std::int64_t UlpDiff(float a, float b) {
+    if (a == b) return 0;
+    if (std::isnan(a) || std::isnan(b)) return INT64_MAX;
+
+    // Map the float ordering onto a monotonic integer ordering: negatives are
+    // stored sign-magnitude, so they have to be reflected around zero.
+    auto Ordered = [](float x) -> std::int64_t {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &x, sizeof bits);
+        return (bits & 0x80000000u)
+                   ? -static_cast<std::int64_t>(bits & 0x7FFFFFFFu)
+                   : static_cast<std::int64_t>(bits);
+    };
+    const std::int64_t d = Ordered(a) - Ordered(b);
+    return d < 0 ? -d : d;
+}
+
+// "Same answer computed two ways", judged on whichever of the two scales is
+// meaningful here.
+//
+// ULP alone is wrong near a zero crossing: cos(pi/2) is about 8e-05, where one
+// ULP is 6e-12, so a difference of 2e-08 -- a single fused multiply-add's worth,
+// and utterly negligible -- reads as 3527 ULP. An absolute epsilon alone is
+// wrong at large magnitudes, where it silently permits a real divergence. So a
+// value passes if it is close on EITHER scale: within a few ULP, or within a few
+// ULP of one, which is the floor that matters for anything living in [-1, 1].
+inline ::testing::AssertionResult
+SameToWithin(float actual, float expected, std::int64_t maxUlp = 4,
+             float absFloor = 2e-7f) {
+    const std::int64_t ulp = UlpDiff(actual, expected);
+    const float diff = std::abs(actual - expected);
+    if (ulp <= maxUlp || diff <= absFloor) return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+           << "actual " << actual << ", expected " << expected << " ("
+           << ulp << " ulp, abs " << diff << ")";
 }
 
 // A dot product's error is bounded by the magnitude of its terms, not of its

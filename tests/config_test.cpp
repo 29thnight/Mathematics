@@ -4,6 +4,10 @@
 
 #include <mathf/config.hpp>
 
+// The umbrella header, included here so that "does mathf.hpp compile at all"
+// is a build failure rather than something a consumer discovers first.
+#include <mathf/mathf.hpp>
+
 #include <gtest/gtest.h>
 
 TEST(Config, ExactlyOneBackendIsSelected) {

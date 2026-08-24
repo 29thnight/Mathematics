@@ -14,6 +14,7 @@
 #ifndef MATHF_VECTOR_COMMON_HPP
 #define MATHF_VECTOR_COMMON_HPP
 
+#include <mathf/scalar.hpp>
 #include <mathf/vec_reg.hpp>
 
 #include <cmath>
@@ -266,14 +267,8 @@ MATHF_NODISCARD MATHF_INLINE constexpr float Distance(V a, V b) noexcept {
 
 namespace detail {
 
-// consteval_ops::SqrtScalar exists because std::sqrt is not constant-evaluable,
-// and it pays for that with a Newton-Raphson loop in double. Calling it at run
-// time is a catastrophe -- measured at 4.6x slower than the SIMD path when it
-// slipped into a normalize by accident -- so the runtime side goes to std::sqrt.
-MATHF_NODISCARD MATHF_INLINE constexpr float ScalarSqrt(float x) noexcept {
-    MATHF_IF_CONSTEVAL { return consteval_ops::SqrtScalar(x); }
-    return std::sqrt(x);
-}
+// ScalarSqrt lives in mathf/scalar.hpp -- the inverse trigonometric functions
+// there need it too, and they must not depend on the vector layer.
 
 // Branchless, for Vector4. Every lane is computed and then selected.
 template <VectorLike V>
