@@ -60,7 +60,9 @@ constexpr math::vector3 y = math::vector3::unit_y();
 static_assert(math::cross(x, y) == math::vector3::unit_z());
 ```
 
-전체 사용법과 퇴화 입력 정책은 [사용 가이드](docs/GUIDE.md)에 정리돼 있다.
+바로 가져다 쓸 수 있는 기능별 예제는
+[표현식과 기능 둘러보기](docs/EXPRESSIONS.md)에, 전체 규약과 퇴화 입력 정책은
+[사용 가이드](docs/GUIDE.md)에 정리돼 있다.
 
 ## API와 수학 관례
 
@@ -248,6 +250,7 @@ scripts\open_vs.bat
 
 ## 문서
 
+- [EXPRESSIONS.md](docs/EXPRESSIONS.md) — 표현식 중심의 기능 소개와 실전 예제
 - [GUIDE.md](docs/GUIDE.md) — 관례, 예제, 퇴화 입력 정책, DirectXMath 이주표
 - [PLAN.md](docs/PLAN.md) — 설계 결정, Phase 이력, 현재 릴리스 판정
 - [BASELINE.md](docs/BASELINE.md) — 성능 기준선과 재현 절차
