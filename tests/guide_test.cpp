@@ -128,11 +128,37 @@ TEST(guide, the_size_table_is_correct) {
     EXPECT_EQ(sizeof(quaternion), 16u);
     EXPECT_EQ(sizeof(matrix3x3), 36u);
     EXPECT_EQ(sizeof(matrix4x4), 64u);
+    EXPECT_EQ(sizeof(color), 16u);
+    EXPECT_EQ(sizeof(rect), 16u);
     EXPECT_EQ(sizeof(plane), 16u);
     EXPECT_EQ(sizeof(sphere), 16u);
     EXPECT_EQ(sizeof(aabb), 24u);
     EXPECT_EQ(sizeof(ray), 24u);
+    EXPECT_EQ(sizeof(bounding_frustum), 52u);
     EXPECT_EQ(sizeof(vec_reg), 16u);
+}
+
+TEST(guide, color_rect_and_frustum_examples_are_accurate) {
+    const color source{0.8f, 0.4f, 0.2f, 0.5f};
+    EXPECT_EQ(premultiply(source), color(0.4f, 0.2f, 0.1f, 0.5f));
+
+    const rect ui_bounds{10.0f, 20.0f, 100.0f, 50.0f};
+    EXPECT_TRUE(contains(ui_bounds, vector2{10.0f, 20.0f}));
+    EXPECT_FALSE(contains(ui_bounds, vector2{110.0f, 70.0f}));
+
+    const matrix4x4 projection =
+        perspective_fov_lh(radians(60.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+    const bounding_frustum frustum =
+        bounding_frustum_from_projection_lh(projection);
+    const vector3 camera_position{0.0f, 0.0f, 1.0f};
+    const aabb world_bounds{{0.0f, 0.0f, 5.0f}, {1.0f, 1.0f, 1.0f}};
+    EXPECT_EQ(contains(frustum, camera_position), containment::contains);
+    EXPECT_TRUE(intersects(frustum, world_bounds));
+
+    const auto corners = frustum.corners();
+    const auto planes = frustum_planes(frustum);
+    EXPECT_EQ(corners.size(), bounding_frustum::corner_count);
+    EXPECT_EQ(planes.size(), bounding_frustum::plane_count);
 }
 
 // "AABB의 함정" -- the guide claims these two are DIFFERENT boxes.

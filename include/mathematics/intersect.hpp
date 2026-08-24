@@ -19,6 +19,7 @@
 #define MATHEMATICS_INTERSECT_HPP
 
 #include <mathematics/bounds.hpp>
+#include <mathematics/frustum.hpp>
 #include <mathematics/plane.hpp>
 #include <mathematics/ray.hpp>
 
@@ -332,6 +333,365 @@ raycast_triangle(const ray& input_ray, const vector3& v0, const vector3& v1,
                  const vector3& v2) noexcept {
     float distance = 0.0f;
     if (!raycast_triangle(input_ray, v0, v1, v2, distance)) return std::nullopt;
+    return distance;
+}
+
+// ----------------------------------------------------- bounding frustum helpers
+namespace detail {
+
+template <std::size_t count>
+inline constexpr void
+project_points(const std::array<vector3, count>& points, const vector3& axis,
+               float& minimum, float& maximum) noexcept {
+    minimum = maximum = dot(points[0], axis);
+    for (std::size_t i = 1; i < count; ++i) {
+        const float projection = dot(points[i], axis);
+        if (projection < minimum) minimum = projection;
+        if (projection > maximum) maximum = projection;
+    }
+}
+
+template <std::size_t count_a, std::size_t count_b>
+MATHEMATICS_NODISCARD inline constexpr bool
+separated_on_axis(const std::array<vector3, count_a>& a,
+                  const std::array<vector3, count_b>& b,
+                  const vector3& axis) noexcept {
+    // A zero cross product is a redundant SAT axis. Projecting onto it gives
+    // [0,0] for both volumes, which naturally reports no separation; the
+    // explicit guard also prevents NaN from invalid input leaking through.
+    const float axis_length_sq = length_sq(axis);
+    if (!is_finite_non_zero(axis_length_sq)) return false;
+
+    float minimum_a = 0.0f, maximum_a = 0.0f;
+    float minimum_b = 0.0f, maximum_b = 0.0f;
+    project_points(a, axis, minimum_a, maximum_a);
+    project_points(b, axis, minimum_b, maximum_b);
+    return maximum_a < minimum_b || maximum_b < minimum_a;
+}
+
+MATHEMATICS_NODISCARD inline constexpr
+std::array<vector3, 8> aabb_corners(const aabb& box) noexcept {
+    return {box.corner(0), box.corner(1), box.corner(2), box.corner(3),
+            box.corner(4), box.corner(5), box.corner(6), box.corner(7)};
+}
+
+// Six unique edge directions: the four perspective rays, plus one horizontal
+// and one vertical edge of a depth slice. The remaining twelve physical edges
+// are parallel to one of these and add no SAT axis.
+MATHEMATICS_NODISCARD inline constexpr
+std::array<vector3, 6>
+frustum_edge_directions(const std::array<vector3, 8>& corners) noexcept {
+    return {corners[4] - corners[0], corners[5] - corners[1],
+            corners[6] - corners[2], corners[7] - corners[3],
+            corners[1] - corners[0], corners[3] - corners[0]};
+}
+
+MATHEMATICS_NODISCARD inline constexpr float
+point_segment_distance_sq(const vector3& point, const vector3& a,
+                          const vector3& b) noexcept {
+    const vector3 edge = b - a;
+    const float denominator = length_sq(edge);
+    if (!is_finite_non_zero(denominator)) return length_sq(point - a);
+    float t = dot(point - a, edge) / denominator;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return length_sq(point - (a + edge * t));
+}
+
+// Squared distance to a triangle from Real-Time Collision Detection. The
+// degenerate fallback matters for frusta whose near distance is zero: their
+// four near corners collapse to the projection origin.
+MATHEMATICS_NODISCARD inline constexpr float
+point_triangle_distance_sq(const vector3& point, const vector3& a,
+                           const vector3& b, const vector3& c) noexcept {
+    const vector3 ab = b - a;
+    const vector3 ac = c - a;
+    if (!is_finite_non_zero(length_sq(cross(ab, ac)))) {
+        const float d0 = point_segment_distance_sq(point, a, b);
+        const float d1 = point_segment_distance_sq(point, b, c);
+        const float d2 = point_segment_distance_sq(point, c, a);
+        const float minimum01 = d0 < d1 ? d0 : d1;
+        return minimum01 < d2 ? minimum01 : d2;
+    }
+
+    const vector3 ap = point - a;
+    const float d1 = dot(ab, ap);
+    const float d2 = dot(ac, ap);
+    if (d1 <= 0.0f && d2 <= 0.0f) return length_sq(ap);
+
+    const vector3 bp = point - b;
+    const float d3 = dot(ab, bp);
+    const float d4 = dot(ac, bp);
+    if (d3 >= 0.0f && d4 <= d3) return length_sq(bp);
+
+    const float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+        const float v = d1 / (d1 - d3);
+        return length_sq(point - (a + ab * v));
+    }
+
+    const vector3 cp = point - c;
+    const float d5 = dot(ab, cp);
+    const float d6 = dot(ac, cp);
+    if (d6 >= 0.0f && d5 <= d6) return length_sq(cp);
+
+    const float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+        const float w = d2 / (d2 - d6);
+        return length_sq(point - (a + ac * w));
+    }
+
+    const float va = d3 * d6 - d5 * d4;
+    if (va <= 0.0f && d4 - d3 >= 0.0f && d5 - d6 >= 0.0f) {
+        const vector3 bc = c - b;
+        const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return length_sq(point - (b + bc * w));
+    }
+
+    const float inverse = 1.0f / (va + vb + vc);
+    const float v = vb * inverse;
+    const float w = vc * inverse;
+    return length_sq(point - (a + ab * v + ac * w));
+}
+
+} // namespace detail
+
+// ----------------------------------------------------- frustum point and sphere
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const bounding_frustum& frustum, const vector3& point) noexcept {
+    const auto planes = frustum_planes(frustum);
+    for (const plane& boundary : planes) {
+        if (signed_distance(boundary, point) > 0.0f) return false;
+    }
+    return true;
+}
+
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const bounding_frustum& frustum, const vector3& point) noexcept {
+    return intersects(frustum, point) ? containment::contains
+                                      : containment::disjoint;
+}
+
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const bounding_frustum& frustum,
+           const sphere& input_sphere) noexcept {
+    const auto planes = frustum_planes(frustum);
+    bool center_inside = true;
+    for (const plane& boundary : planes) {
+        const float distance = signed_distance(boundary, input_sphere.center);
+        if (distance > input_sphere.radius) return false;
+        if (distance > 0.0f) center_inside = false;
+    }
+    if (center_inside) return true;
+
+    // Plane-radius rejection alone has false positives beside edges and
+    // corners. The twelve face triangles include all those features, so the
+    // nearest surface point is found exactly.
+    const auto corners = frustum.corners();
+    constexpr std::size_t triangles[12][3] = {
+        {0, 1, 2}, {0, 2, 3}, {4, 6, 5}, {4, 7, 6},
+        {1, 5, 6}, {1, 6, 2}, {0, 3, 7}, {0, 7, 4},
+        {0, 4, 5}, {0, 5, 1}, {3, 2, 6}, {3, 6, 7}};
+    const float radius_sq = input_sphere.radius * input_sphere.radius;
+    for (const auto& triangle : triangles) {
+        if (detail::point_triangle_distance_sq(
+                input_sphere.center, corners[triangle[0]],
+                corners[triangle[1]], corners[triangle[2]]) <= radius_sq) {
+            return true;
+        }
+    }
+    return false;
+}
+
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const sphere& input_sphere,
+           const bounding_frustum& frustum) noexcept {
+    return intersects(frustum, input_sphere);
+}
+
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const bounding_frustum& frustum,
+         const sphere& input_sphere) noexcept {
+    if (!intersects(frustum, input_sphere)) return containment::disjoint;
+    for (const plane& boundary : frustum_planes(frustum)) {
+        if (signed_distance(boundary, input_sphere.center) >
+            -input_sphere.radius) {
+            return containment::intersects;
+        }
+    }
+    return containment::contains;
+}
+
+// ------------------------------------------------------- frustum versus AABB
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const bounding_frustum& frustum, const aabb& box) noexcept {
+    if (box.is_empty()) return false;
+    const auto frustum_corners = frustum.corners();
+    const auto box_corners = detail::aabb_corners(box);
+
+    // Face normals from both shapes.
+    for (const plane& boundary : frustum_planes(frustum)) {
+        if (detail::separated_on_axis(
+                frustum_corners, box_corners, boundary.normal())) {
+            return false;
+        }
+    }
+    constexpr std::array<vector3, 3> box_axes{
+        vector3{1.0f, 0.0f, 0.0f}, vector3{0.0f, 1.0f, 0.0f},
+        vector3{0.0f, 0.0f, 1.0f}};
+    for (const vector3& axis : box_axes) {
+        if (detail::separated_on_axis(frustum_corners, box_corners, axis)) {
+            return false;
+        }
+    }
+
+    // Edge cross products complete the exact convex-polyhedron SAT.
+    for (const vector3& frustum_edge :
+         detail::frustum_edge_directions(frustum_corners)) {
+        for (const vector3& box_axis : box_axes) {
+            if (detail::separated_on_axis(
+                    frustum_corners, box_corners,
+                    cross(frustum_edge, box_axis))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const aabb& box, const bounding_frustum& frustum) noexcept {
+    return intersects(frustum, box);
+}
+
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const bounding_frustum& frustum, const aabb& box) noexcept {
+    if (!intersects(frustum, box)) return containment::disjoint;
+    for (const vector3& corner : detail::aabb_corners(box)) {
+        if (!intersects(frustum, corner)) return containment::intersects;
+    }
+    return containment::contains;
+}
+
+// ---------------------------------------------------- frustum versus frustum
+MATHEMATICS_NODISCARD inline constexpr bool
+intersects(const bounding_frustum& x, const bounding_frustum& y) noexcept {
+    const auto corners_x = x.corners();
+    const auto corners_y = y.corners();
+
+    for (const plane& boundary : frustum_planes(x)) {
+        if (detail::separated_on_axis(corners_x, corners_y,
+                                      boundary.normal())) {
+            return false;
+        }
+    }
+    for (const plane& boundary : frustum_planes(y)) {
+        if (detail::separated_on_axis(corners_x, corners_y,
+                                      boundary.normal())) {
+            return false;
+        }
+    }
+
+    const auto edges_x = detail::frustum_edge_directions(corners_x);
+    const auto edges_y = detail::frustum_edge_directions(corners_y);
+    for (const vector3& edge_x : edges_x) {
+        for (const vector3& edge_y : edges_y) {
+            if (detail::separated_on_axis(
+                    corners_x, corners_y, cross(edge_x, edge_y))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const bounding_frustum& outer,
+         const bounding_frustum& inner) noexcept {
+    if (!intersects(outer, inner)) return containment::disjoint;
+    for (const vector3& corner : inner.corners()) {
+        if (!intersects(outer, corner)) return containment::intersects;
+    }
+    return containment::contains;
+}
+
+// Reverse containment overloads mirror DirectXCollision's volume API.
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const sphere& outer, const bounding_frustum& inner) noexcept {
+    if (!intersects(outer, inner)) return containment::disjoint;
+    for (const vector3& corner : inner.corners()) {
+        if (!intersects(outer, corner)) return containment::intersects;
+    }
+    return containment::contains;
+}
+
+MATHEMATICS_NODISCARD inline constexpr containment
+contains(const aabb& outer, const bounding_frustum& inner) noexcept {
+    if (!intersects(outer, inner)) return containment::disjoint;
+    for (const vector3& corner : inner.corners()) {
+        if (!intersects(outer, corner)) return containment::intersects;
+    }
+    return containment::contains;
+}
+
+// ----------------------------------------------------------- plane and ray
+MATHEMATICS_NODISCARD inline constexpr plane_side
+classify(const bounding_frustum& frustum,
+         const plane& input_plane) noexcept {
+    bool any_front = false;
+    bool any_back = false;
+    for (const vector3& corner : frustum.corners()) {
+        const float distance = signed_distance(input_plane, corner);
+        if (distance > 0.0f) any_front = true;
+        else if (distance < 0.0f) any_back = true;
+        else return plane_side::straddling;
+        if (any_front && any_back) return plane_side::straddling;
+    }
+    return any_front ? plane_side::front : plane_side::back;
+}
+
+MATHEMATICS_NODISCARD_MSG("distance_out is valid only when raycast returns true")
+inline constexpr bool
+raycast(const ray& input_ray, const bounding_frustum& frustum,
+        float& distance_out) noexcept {
+    if (!detail::is_finite_non_zero(length_sq(input_ray.direction))) {
+        return false;
+    }
+    if (intersects(frustum, input_ray.origin)) {
+        distance_out = 0.0f;
+        return true;
+    }
+
+    float entry = 0.0f;
+    float exit = consteval_ops::infinity;
+    for (const plane& boundary : frustum_planes(frustum)) {
+        const float origin_distance =
+            signed_distance(boundary, input_ray.origin);
+        const float direction_dot =
+            dot_normal(boundary, input_ray.direction);
+        if (direction_dot == 0.0f) {
+            if (origin_distance > 0.0f) return false;
+            continue;
+        }
+
+        const float t = -origin_distance / direction_dot;
+        if (direction_dot < 0.0f) {
+            if (t > entry) entry = t;
+        } else {
+            if (t < exit) exit = t;
+        }
+        if (entry > exit) return false;
+    }
+
+    if (exit < 0.0f) return false;
+    distance_out = entry;
+    return true;
+}
+
+MATHEMATICS_NODISCARD inline constexpr std::optional<float>
+raycast(const ray& input_ray, const bounding_frustum& frustum) noexcept {
+    float distance = 0.0f;
+    if (!raycast(input_ray, frustum, distance)) return std::nullopt;
     return distance;
 }
 

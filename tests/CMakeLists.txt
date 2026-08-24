@@ -18,6 +18,8 @@ add_executable(mathematics_tests
     quaternion_test.cpp
     transform_test.cpp
     geometry_test.cpp
+    color_rect_test.cpp
+    frustum_test.cpp
     format_test.cpp
     guide_test.cpp)
 

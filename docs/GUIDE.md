@@ -115,15 +115,56 @@ static_assert(math::inverse(math::matrix4x4::identity()) ==
 | `quaternion` | 16 B | `(x,y,z,w)`. **`vector_like`가 아니다** |
 | `matrix3x3` | 36 B | 회전·크기. 이동 없음 |
 | `matrix4x4` | 64 B | 상수 버퍼에 그대로 업로드 가능 |
+| `color` | 16 B | 선형 RGBA, 기본값은 opaque black |
+| `rect` | 16 B | float `x/y/width/height`, 점 포함은 half-open |
 | `plane` | 16 B | `(a,b,c,d)`, `d = -dot(n, p)` |
 | `sphere` | 16 B | 중심 + 반지름 |
 | `aabb` | 24 B | 중심 + **extents**(반폭) |
 | `ray` | 24 B | 원점 + 방향, **반직선** |
+| `bounding_frustum` | 52 B | origin/orientation + 4 slopes + near/far |
 | `vec_reg` | 16 B | 레지스터 타입. 핫 루프에서 직접 |
 
 `quaternion`이 `vector_like`가 아닌 것은 의도다. 벡터의 `*`는 HLSL을 따라
 성분별 곱인데, 쿼터니언에 그게 적용되면 컴파일되고 거의 맞게 렌더되는 버그가
 된다. `static_assert`로 막아두었다.
+
+### color와 rect
+
+`color`는 `vector4`와 같은 16바이트지만 `r/g/b/a` 의미를 가진 별도 타입이다.
+값은 자동으로 sRGB 변환되지 않는 선형 float이며 `premultiply`, `adjust_saturation`,
+`adjust_contrast`, `pack_rgba8`/`pack_bgra8`를 제공한다. 기본값은 SimpleMath와 같은
+opaque black이다.
+
+`rect`는 float `x/y/width/height`를 저장한다. 점 포함은 최소 변을 포함하고 최대 변은
+제외하는 half-open 규칙이며, 변만 맞닿은 두 rect는 면적이 없으므로 교차하지 않는다.
+음수 크기는 자동으로 숨기지 않고 `normalized(rect)`로 명시적으로 바로잡는다.
+
+### bounding_frustum
+
+```cpp
+const math::bounding_frustum frustum =
+    math::bounding_frustum_from_projection_lh(projection);
+
+if (math::contains(frustum, camera_position) == math::containment::contains &&
+    math::intersects(frustum, world_bounds)) {
+    draw_visible_object();
+}
+
+const auto corners = frustum.corners();
+const auto planes = math::frustum_planes(frustum); // 내부는 전부 <= 0
+```
+
+표현은 DirectXCollision의 `BoundingFrustum`과 같다: origin, orientation,
+right/left/top/bottom slope, near/far 순서다. LH와 RH 생성은
+`bounding_frustum_from_projection_lh/rh`로 분리했고, 특이 투영을 구분해야 하면
+`try_bounding_frustum_from_projection_lh/rh`를 쓴다. 구는 면·모서리·꼭짓점까지,
+AABB와 frustum 쌍은 face normal과 edge cross axis까지 검사하므로 6개 평면만 보는
+보수적 컬링 테스트가 아니라 정밀 교차다.
+
+DirectXTK SimpleMath는 별도 `BoundingFrustum` 래퍼를 정의하지 않고
+DirectXCollision 타입을 사용하므로, 패리티 테스트의 비교 기준도
+`DirectX::BoundingFrustum`이다. LH/RH 생성 필드와 코너, TRS 변환, 점·구·AABB·
+frustum 포함/교차, raycast를 같은 입력으로 대조한다.
 
 ### aabb의 함정
 
@@ -306,12 +347,18 @@ raycast(r, a, d)  -> bool + float  맞는가, 얼마나 멀리
 | `XMQuaternionSlerp` / `normalize` | `slerp` / `normalize` |
 | `XMQuaternionConjugate` / `inverse` | `conjugate` / `inverse` |
 | `XMVector3Rotate` | `rotate(v, q)` |
+| `SimpleMath::Color` | `color` |
+| `SimpleMath::Rectangle` | `rect` (float 크기, 플랫폼 `RECT` 의존 없음) |
 | `XMPlaneFromPointNormal` / `from_points` | `plane_from_point_normal` / `plane_from_points` |
 | `XMPlaneDotCoord` | `signed_distance` |
 | `XMPlaneDotNormal` | `dot_normal` |
 | `XMPlaneNormalize` | `normalize(plane)` |
 | `XMScalarSinCos` | `sin_cos` |
 | `BoundingSphere` / `BoundingBox` | `sphere` / `aabb` |
+| `BoundingFrustum` | `bounding_frustum` |
+| `BoundingFrustum::CreateFromMatrix` | `bounding_frustum_from_projection_lh/rh` |
+| `BoundingFrustum::GetCorners/GetPlanes` | `corners()` / `frustum_planes` |
+| `BoundingFrustum::Transform` | `transform(frustum, ...)` |
 | `ContainmentType` | `containment` |
 | `PlaneIntersectionType` | `plane_side` (`INTERSECTING` → `straddling`) |
 | `sphere.intersects(o, d, dist)` | `raycast(ray, sphere, dist)` |

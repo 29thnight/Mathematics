@@ -20,16 +20,19 @@
 // STRUCTURED BINDINGS need nothing from this header, or from any other. Every
 // packed type here has only public data members, which is all the language
 // asks, so `auto [x, y, z] = v;` already works out of the box -- for vectors,
-// quaternions, spheres, boxes and rays alike. No tuple protocol is provided,
+// colours, rectangles, quaternions, spheres, boxes, frusta and rays alike. No
+// tuple protocol is provided,
 // because adding one would buy `get<0>(v)` and `std::apply` and cost a pile of
 // specializations nobody has asked for. The tests pin that bindings work, so
 // the property cannot be lost by accident.
 #ifndef MATHEMATICS_FORMAT_HPP
 #define MATHEMATICS_FORMAT_HPP
 
+#include <mathematics/color.hpp>
 #include <mathematics/geometry.hpp>
 #include <mathematics/matrix.hpp>
 #include <mathematics/quaternion.hpp>
+#include <mathematics/rect.hpp>
 #include <mathematics/vector.hpp>
 
 // GCC only shipped <format> in 13, and libc++ kept it behind a flag for a
@@ -147,6 +150,42 @@ struct std::formatter<math::quaternion> : math::detail::float_spec_formatter {
         out = write_float(out, q.z);
         *out++ = ',';  *out++ = ' ';
         out = write_float(out, q.w);
+        *out++ = ')';
+        return out;
+    }
+};
+
+template <>
+struct std::formatter<math::color> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::color& value, context_type& context) const {
+        auto out = context.out();
+        out = std::format_to(out, "color(rgba=(");
+        out = write_float(out, value.r);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, value.g);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, value.b);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, value.a);
+        out = std::format_to(out, "))");
+        return out;
+    }
+};
+
+template <>
+struct std::formatter<math::rect> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::rect& value, context_type& context) const {
+        auto out = context.out();
+        out = std::format_to(out, "rect(x=");
+        out = write_float(out, value.x);
+        out = std::format_to(out, ", y=");
+        out = write_float(out, value.y);
+        out = std::format_to(out, ", w=");
+        out = write_float(out, value.width);
+        out = std::format_to(out, ", h=");
+        out = write_float(out, value.height);
         *out++ = ')';
         return out;
     }
@@ -274,6 +313,44 @@ struct std::formatter<math::ray> : math::detail::float_spec_formatter {
         out = write_float(out, input_ray.direction.y);
         *out++ = ',';  *out++ = ' ';
         out = write_float(out, input_ray.direction.z);
+        out = std::format_to(out, "))");
+        return out;
+    }
+};
+
+template <>
+struct std::formatter<math::bounding_frustum>
+    : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::bounding_frustum& frustum,
+                context_type& context) const {
+        auto out = context.out();
+        out = std::format_to(out, "frustum(o=(");
+        out = write_float(out, frustum.origin.x);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.origin.y);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.origin.z);
+        out = std::format_to(out, "), q=(");
+        out = write_float(out, frustum.orientation.x);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.orientation.y);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.orientation.z);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.orientation.w);
+        out = std::format_to(out, "), slopes=(");
+        out = write_float(out, frustum.right_slope);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.left_slope);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.top_slope);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.bottom_slope);
+        out = std::format_to(out, "), depth=(");
+        out = write_float(out, frustum.near_plane);
+        *out++ = ',';  *out++ = ' ';
+        out = write_float(out, frustum.far_plane);
         out = std::format_to(out, "))");
         return out;
     }

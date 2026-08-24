@@ -14,6 +14,7 @@
 #define MATHEMATICS_GEOMETRY_HPP
 
 #include <mathematics/bounds.hpp>
+#include <mathematics/frustum.hpp>
 #include <mathematics/intersect.hpp>
 #include <mathematics/plane.hpp>
 #include <mathematics/ray.hpp>

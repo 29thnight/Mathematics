@@ -17,7 +17,8 @@ DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 �
 
 ## 핵심 특징
 
-- `vector2/3/4`, `matrix3x3/4x4`, `quaternion`, `plane`, `ray`, `aabb`, `sphere` 제공
+- `vector2/3/4`, `matrix3x3/4x4`, `quaternion`, `color`, `rect`, `plane`,
+  `ray`, `aabb`, `sphere`, `bounding_frustum` 제공
 - 벡터·행렬·쿼터니언·TRS·뷰/투영·교차 판정을 하나의 헤더 온리 API로 구성
 - 같은 API를 런타임 SIMD 경로와 `constexpr` 상수 평가에서 사용
 - 연속 점 집합은 `std::span`, 실패 가능한 역행렬·분해·raycast는 `std::optional` API 제공
@@ -104,9 +105,10 @@ static_assert(math::cross(x, y) == math::vector3::unit_z());
 | 전체 API | `<mathematics/mathematics.hpp>` |
 | 스칼라·각도·삼각함수 | `<mathematics/scalar.hpp>` |
 | 벡터 | `<mathematics/vector.hpp>` 또는 개별 `vector2/3/4.hpp` |
+| 색상·2D 사각형 | `<mathematics/color.hpp>`, `<mathematics/rect.hpp>` |
 | 행렬 | `<mathematics/matrix.hpp>` 또는 개별 `matrix3x3/4x4.hpp` |
 | 쿼터니언·변환 | `<mathematics/quaternion.hpp>`, `<mathematics/transform.hpp>` |
-| 기하·교차 판정 | `<mathematics/geometry.hpp>` |
+| 기하·교차 판정 | `<mathematics/geometry.hpp>` (`bounding_frustum` 포함) |
 | C++20 벡터·행렬 range view | `<mathematics/views.hpp>` |
 | 고정 extent range 종단 연산 | `<mathematics/ranges.hpp>` |
 | C++23 행렬 `mdspan` view | `<mathematics/mdspan.hpp>` |
@@ -134,6 +136,12 @@ if (const auto inverse_world = math::try_inverse(world)) {
 
 if (const auto parts = math::decompose(world)) {
     use_trs(parts->scale, parts->rotation, parts->translation);
+}
+
+const math::bounding_frustum camera_bounds =
+    math::bounding_frustum_from_projection_lh(projection);
+if (math::intersects(camera_bounds, object_bounds)) {
+    submit_visible_object();
 }
 ```
 

@@ -15,11 +15,14 @@
 namespace {
 
 using math::aabb;
+using math::bounding_frustum;
+using math::color;
 using math::matrix3x3;
 using math::matrix4x4;
 using math::plane;
 using math::quaternion;
 using math::ray;
+using math::rect;
 using math::sphere;
 using math::vector2;
 using math::vector3;
@@ -71,6 +74,28 @@ TEST(structured_bindings, work_on_every_packed_type) {
         EXPECT_FLOAT_EQ(origin.x, 1.0f);
         EXPECT_FLOAT_EQ(direction.z, 1.0f);
     }
+    {
+        const auto [r, g, b, a] = color{0.1f, 0.2f, 0.3f, 0.4f};
+        EXPECT_FLOAT_EQ(r, 0.1f);
+        EXPECT_FLOAT_EQ(a, 0.4f);
+    }
+    {
+        const auto [x, y, width, height] = rect{1, 2, 3, 4};
+        EXPECT_FLOAT_EQ(x, 1.0f);
+        EXPECT_FLOAT_EQ(height, 4.0f);
+    }
+    {
+        const auto [origin, orientation, right, left, top, bottom,
+                    near_plane, far_plane] = bounding_frustum{};
+        EXPECT_EQ(origin, vector3::zero());
+        EXPECT_EQ(orientation, quaternion::identity());
+        EXPECT_FLOAT_EQ(right, 1.0f);
+        EXPECT_FLOAT_EQ(left, -1.0f);
+        EXPECT_FLOAT_EQ(top, 1.0f);
+        EXPECT_FLOAT_EQ(bottom, -1.0f);
+        EXPECT_FLOAT_EQ(near_plane, 0.0f);
+        EXPECT_FLOAT_EQ(far_plane, 1.0f);
+    }
 }
 
 // Bindings must alias the object, not a copy, when taken by reference -- which
@@ -106,6 +131,13 @@ TEST(format, quaternion_prints_scalar_last) {
               "(0.1, 0.2, 0.3, 0.9)");
     // The identity is (0,0,0,1) and must read that way round.
     EXPECT_EQ(std::format("{}", quaternion::identity()), "(0, 0, 0, 1)");
+}
+
+TEST(format, color_and_rect_print_semantic_member_names) {
+    EXPECT_EQ(std::format("{:.1f}", color{0.1f, 0.2f, 0.3f, 0.4f}),
+              "color(rgba=(0.1, 0.2, 0.3, 0.4))");
+    EXPECT_EQ(std::format("{:.0f}", rect{1, 2, 3, 4}),
+              "rect(x=1, y=2, w=3, h=4)");
 }
 
 // ------------------------------------------------------------------ matrices
@@ -144,6 +176,9 @@ TEST(format, geometry_prints_meaning_not_storage) {
     EXPECT_EQ(std::format("{:.0f}", aabb{vector3{0, 0, 0}, vector3{1, 2, 3}}),
               "aabb(min=(-1, -2, -3), max=(1, 2, 3))");
     EXPECT_EQ(std::format("{}", aabb{}), "aabb(empty)");
+    EXPECT_EQ(std::format("{:.0f}", bounding_frustum{}),
+              "frustum(o=(0, 0, 0), q=(0, 0, 0, 1), "
+              "slopes=(1, -1, 1, -1), depth=(0, 1))");
 }
 
 // Formatting must compose: a vector inside a wider sentence, and repeated
