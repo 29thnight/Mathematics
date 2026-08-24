@@ -66,6 +66,16 @@ OneInUnusedLanes(VecReg v) noexcept {
     }
 }
 
+// True only for a value that can be divided by and give a meaningful answer.
+//
+// Written without std::isfinite, which is only constexpr from C++23 and so
+// cannot serve the compile-time path on a C++20 build. `x - x == 0` is false for
+// both infinities and NaN and true for every finite value, which is exactly the
+// distinction wanted, and it costs one subtract.
+MATHF_NODISCARD MATHF_INLINE constexpr bool IsFiniteNonZero(float x) noexcept {
+    return x != 0.0f && x - x == 0.0f;
+}
+
 } // namespace detail
 
 using detail::VectorLike;

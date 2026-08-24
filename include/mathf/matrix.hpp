@@ -20,8 +20,12 @@
 //   Transform      TransformPoint (w = 1) TransformDirection (w = 0)
 //   Comparison     == != (exact), NearEqual(a, b, epsilon)
 //
-// A singular matrix inverts to the identity rather than to NaN; ask Determinant
-// first if that distinction matters.
+// A matrix whose determinant is not a finite non-zero -- singular, overflowed,
+// or holding a NaN -- inverts to the identity rather than to NaN. Ask
+// Determinant first if that distinction matters, and see the note above
+// Matrix4x4's Inverse for why it is the right question to ask: close to
+// singular, whether Inverse itself reports singularity is not guaranteed to be
+// the same at compile time as at run time.
 #ifndef MATHF_MATRIX_HPP
 #define MATHF_MATRIX_HPP
 

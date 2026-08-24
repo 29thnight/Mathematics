@@ -112,6 +112,49 @@ TEST(MatrixMultiply, DoesNotCommute) {
     EXPECT_FALSE(a * b == b * a);
 }
 
+// detail::MultiplyScalar runs ONLY during constant evaluation -- every build
+// configuration takes MultiplyAvx or CombineRows at run time -- and the only
+// constant-evaluated product before this was identity times identity, which is
+// symmetric and would survive a swapped row/column index untouched. This is the
+// same shape of hole that left Vector4's NormalizeWide unexecuted in Phase 2.
+TEST(MatrixMultiply, CompileTimeMatchesRuntime) {
+    constexpr Matrix4x4 a{1, 2, 0, 0,
+                          0, 1, 0, 0,
+                          0, 0, 1, 0,
+                          0, 0, 0, 1};
+    constexpr Matrix4x4 b{1, 0, 0, 0,
+                          3, 1, 0, 0,
+                          0, 0, 1, 0,
+                          0, 0, 0, 1};
+    constexpr Matrix4x4 compileTime = a * b;
+    static_assert(compileTime.m[0][0] == 7.0f);
+    static_assert(compileTime.m[0][1] == 2.0f);
+    static_assert(compileTime.m[1][0] == 3.0f);
+    // Not commutative, so this also pins which operand is which.
+    static_assert((b * a).m[0][0] == 1.0f);
+
+    const Matrix4x4 runTime = a * b;
+    EXPECT_TRUE(compileTime == runTime);
+}
+
+// Small integers throughout, so every product is exact in float and the two
+// paths must agree bit for bit rather than merely closely -- a rounding
+// tolerance here would hide an index bug in the constexpr path.
+TEST(MatrixMultiply, CompileTimeMatchesRuntimeOnAFullMatrix) {
+    constexpr Matrix4x4 a{ 1,  2,  3,  4,
+                           5,  6,  7,  8,
+                           9, 10, 11, 12,
+                          13, 14, 15, 16};
+    constexpr Matrix4x4 b{ 2,  0,  1,  3,
+                           1,  4,  0,  2,
+                           0,  3,  5,  1,
+                           6,  1,  2,  0};
+    constexpr Matrix4x4 compileTime = a * b;
+    const Matrix4x4 runTime = a * b;
+    EXPECT_TRUE(compileTime == runTime)
+        << "MultiplyScalar disagrees with the active runtime backend";
+}
+
 TEST(MatrixMultiply, IsAssociative) {
     RandomVectors gen(kSeed + 90);
     for (int n = 0; n < 64; ++n) {
@@ -169,6 +212,46 @@ TEST(MatrixConvention, TransformDirectionIgnoresTranslation) {
                 Vector3(1, 0, 0));
     EXPECT_TRUE(mathf::TransformPoint(Vector3(1, 0, 0), translate) ==
                 Vector3(11, 20, 30));
+}
+
+// ----------------------------------------------------------------- comparison
+// NearEqual once reported a matrix of NaNs as near-equal to the identity. The
+// test written as `diff > eps || diff < -eps` never fires on a NaN, because
+// every comparison against a NaN is false -- so the loop fell through to
+// "equal". That mattered well beyond the helper itself: almost every inverse and
+// multiply assertion in this file goes through NearEqual, so a bug producing a
+// NaN made the surrounding test pass rather than fail.
+TEST(MatrixNearEqual, RejectsNaN) {
+    Matrix4x4 withNan = Matrix4x4::Identity();
+    withNan.m[1][2] = QuietNaN();
+    EXPECT_FALSE(mathf::NearEqual(withNan, Matrix4x4::Identity()));
+    EXPECT_FALSE(mathf::NearEqual(Matrix4x4::Identity(), withNan));
+
+    Matrix4x4 allNan;
+    for (auto& row : allNan.m) for (auto& e : row) e = QuietNaN();
+    EXPECT_FALSE(mathf::NearEqual(allNan, Matrix4x4::Identity()));
+    EXPECT_FALSE(mathf::NearEqual(allNan, allNan))
+        << "a NaN is near nothing, not even itself";
+
+    Matrix3x3 nan3 = Matrix3x3::Identity();
+    nan3.m[0][1] = QuietNaN();
+    EXPECT_FALSE(mathf::NearEqual(nan3, Matrix3x3::Identity()));
+
+    // The scenario the helper exists to catch: a NaN anywhere in a product must
+    // fail an identity check, not slip through it.
+    constexpr Matrix4x4 m{2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 1};
+    Matrix4x4 spoiled = Inverse(m);
+    spoiled.m[2][2] = QuietNaN();
+    EXPECT_FALSE(mathf::NearEqual(m * spoiled, Matrix4x4::Identity(), 1e-3f));
+}
+
+TEST(MatrixNearEqual, AcceptsWhatItShould) {
+    EXPECT_TRUE(mathf::NearEqual(kCounting, kCounting));
+    Matrix4x4 nudged = kCounting;
+    nudged.m[2][1] += 1e-7f;
+    EXPECT_TRUE(mathf::NearEqual(nudged, kCounting));
+    nudged.m[2][1] += 1.0f;
+    EXPECT_FALSE(mathf::NearEqual(nudged, kCounting));
 }
 
 // ------------------------------------------------------------------ transpose
@@ -257,6 +340,25 @@ static_assert(Inverse(Matrix4x4{2, 0, 0, 0,
                                 0, 0, 8, 0,
                                 0, 0, 0, 1})(1, 1) == 0.25f);
 
+// The two above are diagonal, so every off-diagonal cofactor is zero and a sign
+// or minor-index error in the expansion contributes nothing to check. This one
+// is not: it has a non-zero entry in every off-diagonal position that the
+// complementary-minor expansion touches, and determinant 1, so the exact inverse
+// is representable and the assertion can be equality.
+namespace {
+constexpr Matrix4x4 kUnitTriangular{1, 0, 0, 0,
+                                    2, 1, 0, 0,
+                                    3, 4, 1, 0,
+                                    5, 6, 7, 1};
+}
+static_assert(Determinant(kUnitTriangular) == 1.0f);
+static_assert(Determinant(Transpose(kUnitTriangular)) == 1.0f);
+static_assert(Inverse(kUnitTriangular) * kUnitTriangular ==
+              Matrix4x4::Identity());
+static_assert(Inverse(kUnitTriangular)(3, 0) == -28.0f);
+static_assert(Inverse(kUnitTriangular)(3, 1) == 22.0f);
+static_assert(Inverse(kUnitTriangular)(2, 0) == 5.0f);
+
 TEST(MatrixInverse, VectorAndScalarPathsAgree) {
     RandomVectors gen(kSeed + 94);
     for (int n = 0; n < 128; ++n) {
@@ -276,6 +378,165 @@ TEST(MatrixInverse, CompileTimeMatchesRuntime) {
     constexpr Matrix4x4 compileTime = Inverse(source);
     const Matrix4x4 runTime = Inverse(source);
     EXPECT_TRUE(mathf::NearEqual(compileTime, runTime, 1e-5f));
+}
+
+// A hand-computed inverse, with no reference library involved. Every other
+// inverse test either compares the two implementations to each other or leans on
+// DirectXMath, and DirectXMath is only available on the Windows legs -- so on
+// Linux ARM64 nothing outside Mathf ever checked this answer. The matrix is
+// lower-triangular with a unit diagonal, whose inverse is exact in float, so
+// this can assert equality rather than nearness.
+TEST(MatrixInverse, MatchesHandComputedInverse) {
+    constexpr Matrix4x4 m{1, 0, 0, 0,
+                          2, 1, 0, 0,
+                          3, 4, 1, 0,
+                          5, 6, 7, 1};
+    // Inverse of a unit lower-triangular matrix, by forward substitution:
+    //   row1: -2
+    //   row2: -(3) - (4)(-2) = 5,  -4
+    //   row3: -(5) - 6(-2) - 7(5) = -28,  -(6) - 7(-4) = 22,  -7
+    constexpr Matrix4x4 expected{ 1,  0,  0, 0,
+                                 -2,  1,  0, 0,
+                                  5, -4,  1, 0,
+                                -28, 22, -7, 1};
+    EXPECT_TRUE(Inverse(m) == expected);
+    EXPECT_TRUE(mathf::detail::InverseScalar(m) == expected);
+    static_assert(Inverse(m) == expected);
+}
+
+namespace {
+
+// A 4x4 inverse in double by Gauss-Jordan with partial pivoting. This shares no
+// algebra at all with a cofactor expansion, which is the point: the tests either
+// compare Mathf's two implementations to each other -- and both descend from the
+// same Laplace expansion, so a shared misunderstanding survives -- or lean on
+// DirectXMath, which only exists on the Windows legs. On Linux ARM64 nothing
+// outside Mathf checked these answers at all.
+struct DoubleInverse {
+    double m[4][4];
+    bool ok;
+};
+
+DoubleInverse ReferenceInverse(const Matrix4x4& src) {
+    double a[4][8] = {};
+    double scale = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            a[i][j] = static_cast<double>(src.m[i][j]);
+            scale = std::fmax(scale, std::fabs(a[i][j]));
+        }
+        a[i][4 + i] = 1.0;
+    }
+    if (scale == 0.0) return DoubleInverse{{}, false};
+
+    for (int col = 0; col < 4; ++col) {
+        int piv = col;
+        for (int r = col + 1; r < 4; ++r) {
+            if (std::fabs(a[r][col]) > std::fabs(a[piv][col])) piv = r;
+        }
+        // Relative, not `== 0`: elimination is inexact even in double, so an
+        // exactly singular float matrix leaves a tiny pivot rather than a zero.
+        if (std::fabs(a[piv][col]) < 1e-12 * scale) return DoubleInverse{{}, false};
+        if (piv != col) {
+            for (int j = 0; j < 8; ++j) std::swap(a[col][j], a[piv][j]);
+        }
+        const double inv = 1.0 / a[col][col];
+        for (int j = 0; j < 8; ++j) a[col][j] *= inv;
+        for (int r = 0; r < 4; ++r) {
+            if (r == col) continue;
+            const double f = a[r][col];
+            if (f == 0.0) continue;
+            for (int j = 0; j < 8; ++j) a[r][j] -= f * a[col][j];
+        }
+    }
+
+    DoubleInverse out{};
+    out.ok = true;
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) out.m[i][j] = a[i][4 + j];
+    return out;
+}
+
+} // namespace
+
+// Runs on every backend including NEON, where no external library is available.
+TEST(MatrixInverse, MatchesDoublePrecisionGaussJordan) {
+    RandomVectors gen(kSeed + 95);
+    int checked = 0;
+    double worst = 0.0;
+
+    for (int n = 0; n < 512; ++n) {
+        const Matrix4x4 a = RandomInvertibleMatrix(gen);
+        const DoubleInverse ref = ReferenceInverse(a);
+        ASSERT_TRUE(ref.ok) << n << ": diagonal-biased matrix should invert";
+
+        double scale = 0.0;
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
+                scale = std::fmax(scale, std::fabs(ref.m[i][j]));
+
+        const Matrix4x4 got = Inverse(a);
+        double err = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                err = std::fmax(err, std::fabs(static_cast<double>(got.m[i][j]) -
+                                               ref.m[i][j]));
+            }
+        }
+        // Relative to the largest entry of the inverse, not to each entry: the
+        // small entries of an inverse carry the accumulated error of the large
+        // ones and judging them individually would be a tolerance on noise.
+        worst = std::fmax(worst, err / std::fmax(scale, 1e-30));
+        ++checked;
+    }
+
+    EXPECT_EQ(checked, 512);
+    EXPECT_LT(worst, 1e-4) << "worst relative error against the double reference";
+}
+
+// Degenerate inputs. These are the singular matrices that actually turn up --
+// an uninitialized bone, a zero scale, a duplicated row -- and unlike a matrix
+// that is merely close to singular, every one of them drives the determinant to
+// exactly zero in both implementations, so the two agree.
+TEST(MatrixInverse, RealisticSingularInputsReturnIdentity) {
+    const Matrix4x4 cases[] = {
+        {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},   // zero row
+        {1, 2, 3, 4, 1, 2, 3, 4, 9, 10, 11, 13, 14, 15, 17, 19},  // duplicate
+        {1, 2, 3, 4, 5, 6, 7, 8, 6, 8, 10, 12, 1, 0, 0, 1},    // row2 = r0 + r1
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},      // all zero
+        {2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1},      // zero scale on Y
+    };
+    for (int n = 0; n < static_cast<int>(std::size(cases)); ++n) {
+        EXPECT_FLOAT_EQ(Determinant(cases[n]), 0.0f) << n;
+        EXPECT_TRUE(Inverse(cases[n]) == Matrix4x4::Identity()) << n;
+        EXPECT_TRUE(mathf::detail::InverseScalar(cases[n]) ==
+                    Matrix4x4::Identity()) << n;
+    }
+}
+
+// The guard rejects any determinant that is not a finite non-zero, not merely an
+// exact zero. Without that, a matrix holding an infinity divided by a NaN
+// determinant and returned sixteen NaNs from the scalar path while the vector
+// path returned zeros -- so Inverse answered differently at compile time than at
+// run time, and differently on a scalar build than on an SSE one.
+TEST(MatrixInverse, NonFiniteAndOverflowingInputsReturnIdentity) {
+    const float inf = std::numeric_limits<float>::infinity();
+    const Matrix4x4 cases[] = {
+        {inf, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+        {QuietNaN(), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+        {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, inf, 0, 0, 1},
+        // Determinant overflows to infinity though every entry is finite.
+        {1e10f, 0, 0, 0, 0, 1e10f, 0, 0, 0, 0, 1e10f, 0, 0, 0, 0, 1e10f},
+    };
+    for (int n = 0; n < static_cast<int>(std::size(cases)); ++n) {
+        EXPECT_TRUE(Inverse(cases[n]) == Matrix4x4::Identity()) << n;
+        EXPECT_TRUE(mathf::detail::InverseScalar(cases[n]) ==
+                    Matrix4x4::Identity()) << n
+            << " -- the two paths must agree here, not just each be defensible";
+    }
+
+    EXPECT_TRUE(mathf::Inverse(Matrix3x3{inf, 0, 0, 0, 1, 0, 0, 0, 1}) ==
+                Matrix3x3::Identity());
 }
 
 TEST(Matrix3x3Inverse, TimesTheOriginalIsIdentity) {
@@ -304,6 +565,25 @@ TEST(Matrix3x3, TransposeAndMultiply) {
     EXPECT_TRUE(Vector3(1, 0, 0) * a == Vector3(1, 2, 3))
         << "a row vector picks out row 0";
 }
+
+// Every Matrix3x3 operation is marked constexpr; nothing proved any of them
+// could actually be used in a constant expression. Operands are non-symmetric
+// and non-diagonal, so an index swap or a cofactor sign error has somewhere to
+// show up -- a diagonal matrix would hide both.
+namespace {
+constexpr Matrix3x3 kAsym3{1, 2, 3,
+                           0, 1, 4,
+                           5, 6, 0};
+}
+static_assert(Transpose(kAsym3)(0, 1) == 0.0f);
+static_assert(Transpose(kAsym3)(2, 0) == 3.0f);
+static_assert(Determinant(kAsym3) == 1.0f);
+// Determinant 1 and integer entries, so the inverse is exact in float.
+static_assert(Inverse(kAsym3) == Matrix3x3{-24,  18,   5,
+                                            20, -15,  -4,
+                                            -5,   4,   1});
+static_assert((kAsym3 * Matrix3x3::Identity()) == kAsym3);
+static_assert((Vector3(1, 0, 0) * kAsym3) == Vector3(1, 2, 3));
 
 // ---------------------------------------------------------- DirectXMath parity
 // The convention checks above say Mathf is self-consistent. These say it agrees

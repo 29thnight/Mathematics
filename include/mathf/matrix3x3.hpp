@@ -105,7 +105,9 @@ Determinant(const Matrix3x3& mat) noexcept {
          + x[0][2] * (x[1][0] * x[2][1] - x[1][1] * x[2][0]);
 }
 
-// Singular input returns the identity, matching Matrix4x4's choice.
+// Returns the identity unless the determinant is a finite non-zero, matching
+// Matrix4x4's choice -- see the longer note there for why the guard rejects
+// infinities and NaN rather than only exact zero.
 MATHF_NODISCARD MATHF_INLINE constexpr Matrix3x3
 Inverse(const Matrix3x3& mat) noexcept {
     const auto& x = mat.m;
@@ -117,7 +119,7 @@ Inverse(const Matrix3x3& mat) noexcept {
     const float c02 = x[1][0] * x[2][1] - x[1][1] * x[2][0];
 
     const float det = x[0][0] * c00 + x[0][1] * c01 + x[0][2] * c02;
-    if (det == 0.0f) return Matrix3x3::Identity();
+    if (!detail::IsFiniteNonZero(det)) return Matrix3x3::Identity();
     const float invDet = 1.0f / det;
 
     return Matrix3x3{
@@ -145,13 +147,15 @@ operator==(const Matrix3x3& a, const Matrix3x3& b) noexcept {
     return true;
 }
 
+// Positive test, not a negated one -- see the note on Matrix4x4's NearEqual for
+// why the negated spelling silently accepts NaN.
 MATHF_NODISCARD MATHF_INLINE constexpr bool
 NearEqual(const Matrix3x3& a, const Matrix3x3& b,
           float epsilon = 1e-5f) noexcept {
     for (int i = 0; i < 3; ++i) {
         for (int j = 0; j < 3; ++j) {
             const float diff = a.m[i][j] - b.m[i][j];
-            if (diff > epsilon || diff < -epsilon) return false;
+            if (!(diff <= epsilon && diff >= -epsilon)) return false;
         }
     }
     return true;
