@@ -30,7 +30,18 @@ if(MATHF_BENCH_GLM)
     endif()
 endif()
 
-option(MATHF_BENCH_VECTORMATH "Include Sony Vectormath in benchmark comparisons" ON)
+# x86 only. Off SSE the library falls back to its own scalar path, which calls
+# std::sqrtf, std::sinf and friends -- names that are not in namespace std, so it
+# does not compile against libstdc++. That is a defect in Vectormath rather than
+# something to work around, and the comparison is only meaningful on x86 anyway,
+# since Vectormath is an SSE-oriented library with no NEON backend.
+option(MATHF_BENCH_VECTORMATH "Include Sony Vectormath in benchmark comparisons"
+       ${MATHF_TARGET_IS_X86})
+if(MATHF_BENCH_VECTORMATH AND NOT MATHF_TARGET_IS_X86)
+    message(STATUS "Sony Vectormath requested but the target is not x86; skipping.")
+    set(MATHF_BENCH_VECTORMATH OFF)
+endif()
+
 if(MATHF_BENCH_VECTORMATH)
     mathf_fetch_vectormath()
     if(TARGET vectormath::vectormath)

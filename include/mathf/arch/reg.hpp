@@ -70,12 +70,24 @@ MATHF_NODISCARD MATHF_INLINE constexpr float FromBits(std::uint32_t bits) noexce
 // NOT VERIFIED ON MSVC/ARM64: no ARM toolchain was available when this was
 // written, so the __n128 branch rests on documented layout and is first
 // exercised by CI.
+// The four lanes as a plain array. Used only to reinterpret a register during
+// constant evaluation on Clang and GCC, where subscripting a native vector type
+// is not a constant expression -- Clang rejects it outright with
+// -Winvalid-constexpr. std::bit_cast is constant-evaluable for those compilers
+// because their vector types contain no union members; on MSVC the intrinsic
+// type IS a union, which rules bit_cast out but makes the member accessible
+// directly instead. The two restrictions are exactly complementary.
+struct RegLanes {
+    float f[4];
+};
+
 MATHF_NODISCARD MATHF_INLINE constexpr float Lane(const VecReg& r, int i) noexcept {
 #if MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_SSE
     return r.v.m128_f32[i];
 #elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
     return r.v.n128_f32[i];
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
+    MATHF_IF_CONSTEVAL { return std::bit_cast<RegLanes>(r.v).f[i]; }
     return r.v[i];
 #else
     return r.v.f[i];
@@ -95,6 +107,14 @@ MATHF_INLINE constexpr void WriteLane(RegNative& v, int i, float x) noexcept {
 #elif MATHF_MSVC_INTRINSIC_UNION && MATHF_SIMD_NEON
     v.n128_f32[i] = x;
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
+    // Same split as Lane: assigning an element of a native vector type is not a
+    // constant expression, so the compile-time path goes through the lane array.
+    MATHF_IF_CONSTEVAL {
+        RegLanes lanes = std::bit_cast<RegLanes>(v);
+        lanes.f[i] = x;
+        v = std::bit_cast<RegNative>(lanes);
+        return;
+    }
     v[i] = x;
 #else
     v.f[i] = x;
@@ -140,7 +160,10 @@ MakeReg(float x, float y, float z, float w) noexcept {
         detail::WriteLane(r.v, 3, w);
         return r;
 #elif MATHF_SIMD_SSE || MATHF_SIMD_NEON
-        return VecReg{RegNative{x, y, z, w}};
+        // bit_cast rather than brace-initializing the vector type: the literal
+        // form is a compiler extension that GCC and Clang do not spell alike,
+        // while bit_cast is standard and constant-evaluable for both.
+        return VecReg{std::bit_cast<RegNative>(RegLanes{{x, y, z, w}})};
 #else
         return VecReg{RegNative{{x, y, z, w}}};
 #endif
