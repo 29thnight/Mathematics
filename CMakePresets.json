@@ -6,7 +6,7 @@
       "name": "base",
       "hidden": true,
       "description": "Builds outside the OneDrive-synced tree: syncing object files mid-build corrupts them (docs/PLAN.md risk table).",
-      "binaryDir": "$env{LOCALAPPDATA}/MathfBuild/${presetName}",
+      "binaryDir": "$env{LOCALAPPDATA}/MathematicsBuild/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
@@ -57,7 +57,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "MATHF_FORCE_SCALAR": "ON"
+        "MATHEMATICS_FORCE_SCALAR": "ON"
       }
     },
     {
@@ -69,13 +69,13 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "cl",
         "CMAKE_CXX_COMPILER": "cl",
-        "MATHF_BASELINE_SSE2": "ON"
+        "MATHEMATICS_BASELINE_SSE2": "ON"
       }
     },
     {
       "name": "vs2026",
       "displayName": "Visual Studio 2026 solution (x64)",
-      "description": "Generates Mathf.sln so the whole project can be built, run, and debugged from the IDE. Multi-config: the configuration is picked in Visual Studio, so CMAKE_BUILD_TYPE is deliberately left unset.",
+      "description": "Generates Mathematics.sln so the whole project can be built, run, and debugged from the IDE. Multi-config: the configuration is picked in Visual Studio, so CMAKE_BUILD_TYPE is deliberately left unset.",
       "inherits": "base",
       "generator": "Visual Studio 18 2026",
       "architecture": { "value": "x64", "strategy": "set" },

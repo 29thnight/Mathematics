@@ -1,4 +1,4 @@
-// Spike D: VecReg uses a compiler vector extension type as storage.
+// Spike D: vec_reg uses a compiler vector extension type as storage.
 // Clang/GCC only. These types are constexpr-friendly AND map 1:1 to xmm.
 // Question: is this the best Clang/GCC path (with A/B/C used on MSVC)?
 
@@ -8,24 +8,24 @@
 
 using f32x4 = float __attribute__((vector_size(16)));
 
-struct VecReg {
+struct vec_reg {
     f32x4 v;
 };
 
-constexpr VecReg Set(float x, float y, float z, float w) noexcept {
-    return VecReg{f32x4{x, y, z, w}};
+constexpr vec_reg set(float x, float y, float z, float w) noexcept {
+    return vec_reg{f32x4{x, y, z, w}};
 }
-constexpr VecReg Add(VecReg a, VecReg b) noexcept { return VecReg{a.v + b.v}; }
-constexpr VecReg Mul(VecReg a, VecReg b) noexcept { return VecReg{a.v * b.v}; }
-constexpr float GetX(VecReg a) noexcept { return a.v[0]; }
+constexpr vec_reg add(vec_reg a, vec_reg b) noexcept { return vec_reg{a.v + b.v}; }
+constexpr vec_reg mul(vec_reg a, vec_reg b) noexcept { return vec_reg{a.v * b.v}; }
+constexpr float get_x(vec_reg a) noexcept { return a.v[0]; }
 
-static_assert(GetX(Add(Set(1, 2, 3, 4), Set(10, 20, 30, 40))) == 11.0f,
+static_assert(get_x(add(set(1, 2, 3, 4), set(10, 20, 30, 40))) == 11.0f,
               "constexpr path failed");
-static_assert(GetX(Mul(Set(3, 0, 0, 0), Set(5, 0, 0, 0))) == 15.0f,
+static_assert(get_x(mul(set(3, 0, 0, 0), set(5, 0, 0, 0))) == 15.0f,
               "constexpr mul failed");
 
-extern "C" VecReg spike_d_chain(VecReg a, VecReg b, VecReg c) noexcept {
-    return Add(a, Mul(b, c));
+extern "C" vec_reg spike_d_chain(vec_reg a, vec_reg b, vec_reg c) noexcept {
+    return add(a, mul(b, c));
 }
 
 #else

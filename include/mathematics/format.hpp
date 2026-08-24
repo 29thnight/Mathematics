@@ -1,6 +1,6 @@
-// mathf/format.hpp — std::format support, and structured bindings.
+// mathematics/format.hpp — std::format support, and structured bindings.
 //
-// An OPT-IN header, not part of mathf.hpp. Including <format> pulls in a large
+// An OPT-IN header, not part of mathematics.hpp. Including <format> pulls in a large
 // chunk of the standard library, and a header-only math library that dragged it
 // into every translation unit would be charging every user for a feature most
 // of them never call. Include this one where you print.
@@ -24,17 +24,17 @@
 // because adding one would buy `get<0>(v)` and `std::apply` and cost a pile of
 // specializations nobody has asked for. The tests pin that bindings work, so
 // the property cannot be lost by accident.
-#ifndef MATHF_FORMAT_HPP
-#define MATHF_FORMAT_HPP
+#ifndef MATHEMATICS_FORMAT_HPP
+#define MATHEMATICS_FORMAT_HPP
 
-#include <mathf/geometry.hpp>
-#include <mathf/matrix.hpp>
-#include <mathf/quaternion.hpp>
-#include <mathf/vector.hpp>
+#include <mathematics/geometry.hpp>
+#include <mathematics/matrix.hpp>
+#include <mathematics/quaternion.hpp>
+#include <mathematics/vector.hpp>
 
 // GCC only shipped <format> in 13, and libc++ kept it behind a flag for a
 // while. Rather than break the build on a toolchain that is otherwise fine,
-// this header becomes empty and MATHF_HAS_FORMAT says so -- callers guard on
+// this header becomes empty and MATHEMATICS_HAS_FORMAT says so -- callers guard on
 // it, and the tests skip themselves.
 #if defined(__has_include)
 #  if __has_include(<format>)
@@ -43,21 +43,21 @@
 #endif
 
 #if defined(__cpp_lib_format) && __cpp_lib_format >= 201907L
-#  define MATHF_HAS_FORMAT 1
+#  define MATHEMATICS_HAS_FORMAT 1
 #else
-#  define MATHF_HAS_FORMAT 0
+#  define MATHEMATICS_HAS_FORMAT 0
 #endif
 
-#if MATHF_HAS_FORMAT
+#if MATHEMATICS_HAS_FORMAT
 
 #include <string>
 
-namespace mathf::detail {
+namespace math::detail {
 
 // The shared body of every formatter here: remember the caller's spec, then
 // replay it around each float. Storing the spec rather than parsing it means a
 // new <format> float spec works the day it lands, with nothing to update.
-struct FloatSpecFormatter {
+struct float_spec_formatter {
     std::string spec;
 
     constexpr auto parse(std::format_parse_context& context) {
@@ -71,8 +71,8 @@ struct FloatSpecFormatter {
         return it;
     }
 
-    template <typename Out>
-    Out WriteFloat(Out out, float value) const {
+    template <typename output_iterator>
+    output_iterator write_float(output_iterator out, float value) const {
         // Rebuilt per call rather than cached: a formatter object is allowed to
         // be const during formatting, and the cost is nothing next to the
         // formatting itself.
@@ -81,52 +81,52 @@ struct FloatSpecFormatter {
     }
 };
 
-} // namespace mathf::detail
+} // namespace math::detail
 
 // ------------------------------------------------------------------- vectors
 template <>
-struct std::formatter<mathf::Vector2> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Vector2& v, Context& context) const {
+struct std::formatter<math::vector2> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::vector2& v, context_type& context) const {
         auto out = context.out();
         *out++ = '(';
-        out = WriteFloat(out, v.x);
+        out = write_float(out, v.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.y);
+        out = write_float(out, v.y);
         *out++ = ')';
         return out;
     }
 };
 
 template <>
-struct std::formatter<mathf::Vector3> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Vector3& v, Context& context) const {
+struct std::formatter<math::vector3> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::vector3& v, context_type& context) const {
         auto out = context.out();
         *out++ = '(';
-        out = WriteFloat(out, v.x);
+        out = write_float(out, v.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.y);
+        out = write_float(out, v.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.z);
+        out = write_float(out, v.z);
         *out++ = ')';
         return out;
     }
 };
 
 template <>
-struct std::formatter<mathf::Vector4> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Vector4& v, Context& context) const {
+struct std::formatter<math::vector4> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::vector4& v, context_type& context) const {
         auto out = context.out();
         *out++ = '(';
-        out = WriteFloat(out, v.x);
+        out = write_float(out, v.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.y);
+        out = write_float(out, v.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.z);
+        out = write_float(out, v.z);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, v.w);
+        out = write_float(out, v.w);
         *out++ = ')';
         return out;
     }
@@ -135,18 +135,18 @@ struct std::formatter<mathf::Vector4> : mathf::detail::FloatSpecFormatter {
 // A quaternion prints in storage order (x, y, z, w), scalar last, matching the
 // layout -- so what you read lines up with what a debugger shows.
 template <>
-struct std::formatter<mathf::Quaternion> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Quaternion& q, Context& context) const {
+struct std::formatter<math::quaternion> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::quaternion& q, context_type& context) const {
         auto out = context.out();
         *out++ = '(';
-        out = WriteFloat(out, q.x);
+        out = write_float(out, q.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, q.y);
+        out = write_float(out, q.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, q.z);
+        out = write_float(out, q.z);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, q.w);
+        out = write_float(out, q.w);
         *out++ = ')';
         return out;
     }
@@ -155,15 +155,15 @@ struct std::formatter<mathf::Quaternion> : mathf::detail::FloatSpecFormatter {
 // ------------------------------------------------------------------ matrices
 // Row-major, one row per line, in the order the library stores them.
 template <>
-struct std::formatter<mathf::Matrix4x4> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Matrix4x4& m, Context& context) const {
+struct std::formatter<math::matrix4x4> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::matrix4x4& m, context_type& context) const {
         auto out = context.out();
         for (int row = 0; row < 4; ++row) {
             *out++ = '[';
             for (int col = 0; col < 4; ++col) {
                 if (col != 0) { *out++ = ','; *out++ = ' '; }
-                out = WriteFloat(out, m.m[row][col]);
+                out = write_float(out, m.m[row][col]);
             }
             *out++ = ']';
             if (row != 3) *out++ = '\n';
@@ -173,15 +173,15 @@ struct std::formatter<mathf::Matrix4x4> : mathf::detail::FloatSpecFormatter {
 };
 
 template <>
-struct std::formatter<mathf::Matrix3x3> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Matrix3x3& m, Context& context) const {
+struct std::formatter<math::matrix3x3> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::matrix3x3& m, context_type& context) const {
         auto out = context.out();
         for (int row = 0; row < 3; ++row) {
             *out++ = '[';
             for (int col = 0; col < 3; ++col) {
                 if (col != 0) { *out++ = ','; *out++ = ' '; }
-                out = WriteFloat(out, m.m[row][col]);
+                out = write_float(out, m.m[row][col]);
             }
             *out++ = ']';
             if (row != 2) *out++ = '\n';
@@ -195,87 +195,90 @@ struct std::formatter<mathf::Matrix3x3> : mathf::detail::FloatSpecFormatter {
 // maximum because that is what a person reads a box for, even though it stores
 // a centre and half-widths. The storage is the machine's business.
 template <>
-struct std::formatter<mathf::Plane> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Plane& p, Context& context) const {
+struct std::formatter<math::plane> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::plane& p, context_type& context) const {
         auto out = context.out();
         out = std::format_to(out, "plane(n=(");
-        out = WriteFloat(out, p.a);
+        out = write_float(out, p.a);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, p.b);
+        out = write_float(out, p.b);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, p.c);
+        out = write_float(out, p.c);
         out = std::format_to(out, "), d=");
-        out = WriteFloat(out, p.d);
+        out = write_float(out, p.d);
         *out++ = ')';
         return out;
     }
 };
 
 template <>
-struct std::formatter<mathf::Sphere> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Sphere& s, Context& context) const {
+struct std::formatter<math::sphere> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::sphere& s, context_type& context) const {
         auto out = context.out();
         out = std::format_to(out, "sphere(c=(");
-        out = WriteFloat(out, s.center.x);
+        out = write_float(out, s.center.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, s.center.y);
+        out = write_float(out, s.center.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, s.center.z);
+        out = write_float(out, s.center.z);
         out = std::format_to(out, "), r=");
-        out = WriteFloat(out, s.radius);
+        out = write_float(out, s.radius);
         *out++ = ')';
         return out;
     }
 };
 
 template <>
-struct std::formatter<mathf::AABB> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::AABB& box, Context& context) const {
-        const mathf::Vector3 lo = box.Min();
-        const mathf::Vector3 hi = box.Max();
+struct std::formatter<math::aabb> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::aabb& box, context_type& context) const {
+        if (box.is_empty()) {
+            return std::format_to(context.out(), "aabb(empty)");
+        }
+        const math::vector3 lo = box.min();
+        const math::vector3 hi = box.max();
         auto out = context.out();
         out = std::format_to(out, "aabb(min=(");
-        out = WriteFloat(out, lo.x);
+        out = write_float(out, lo.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, lo.y);
+        out = write_float(out, lo.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, lo.z);
+        out = write_float(out, lo.z);
         out = std::format_to(out, "), max=(");
-        out = WriteFloat(out, hi.x);
+        out = write_float(out, hi.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, hi.y);
+        out = write_float(out, hi.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, hi.z);
+        out = write_float(out, hi.z);
         out = std::format_to(out, "))");
         return out;
     }
 };
 
 template <>
-struct std::formatter<mathf::Ray> : mathf::detail::FloatSpecFormatter {
-    template <typename Context>
-    auto format(const mathf::Ray& ray, Context& context) const {
+struct std::formatter<math::ray> : math::detail::float_spec_formatter {
+    template <typename context_type>
+    auto format(const math::ray& input_ray, context_type& context) const {
         auto out = context.out();
         out = std::format_to(out, "ray(o=(");
-        out = WriteFloat(out, ray.origin.x);
+        out = write_float(out, input_ray.origin.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, ray.origin.y);
+        out = write_float(out, input_ray.origin.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, ray.origin.z);
+        out = write_float(out, input_ray.origin.z);
         out = std::format_to(out, "), d=(");
-        out = WriteFloat(out, ray.direction.x);
+        out = write_float(out, input_ray.direction.x);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, ray.direction.y);
+        out = write_float(out, input_ray.direction.y);
         *out++ = ',';  *out++ = ' ';
-        out = WriteFloat(out, ray.direction.z);
+        out = write_float(out, input_ray.direction.z);
         out = std::format_to(out, "))");
         return out;
     }
 };
 
-#endif // MATHF_HAS_FORMAT
+#endif // MATHEMATICS_HAS_FORMAT
 
-#endif // MATHF_FORMAT_HPP
+#endif // MATHEMATICS_FORMAT_HPP

@@ -9,149 +9,149 @@
 
 #include "support/reg_testing.hpp"
 
-#include <mathf/transform.hpp>
+#include <mathematics/transform.hpp>
 
 #include <cmath>
 
 #if __has_include(<DirectXMath.h>)
 #  include <DirectXMath.h>
-#  define MATHF_TEST_HAS_DXMATH 1
+#  define MATHEMATICS_TEST_HAS_DXMATH 1
 #else
-#  define MATHF_TEST_HAS_DXMATH 0
+#  define MATHEMATICS_TEST_HAS_DXMATH 0
 #endif
 
 namespace {
 
-using namespace mathf_test;
-using mathf::Matrix4x4;
-using mathf::Quaternion;
-using mathf::Vector3;
-using mathf::Vector4;
+using namespace math_test;
+using math::matrix4x4;
+using math::quaternion;
+using math::vector3;
+using math::vector4;
 
-constexpr float kEps = 1e-5f;
+constexpr float epsilon = 1e-5f;
 
 // A point through a projection, with the perspective divide applied.
-Vector3 Project(const Vector3& viewSpace, const Matrix4x4& proj) {
-    const Vector4 clip = Vector4{viewSpace.x, viewSpace.y, viewSpace.z, 1.0f} * proj;
-    return Vector3{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
+vector3 project(const vector3& view_space, const matrix4x4& proj) {
+    const vector4 clip = vector4{view_space.x, view_space.y, view_space.z, 1.0f} * proj;
+    return vector3{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
 }
 
 } // namespace
 
 // ------------------------------------------------------------ basic transforms
-TEST(TransformBasics, ScaleAndTranslate) {
-    const Matrix4x4 s = mathf::ScalingMatrix(Vector3{2, 3, 4});
-    EXPECT_TRUE(mathf::NearEqual(mathf::TransformPoint(Vector3{1, 1, 1}, s),
-                                 Vector3{2, 3, 4}, kEps));
+TEST(transform_basics, scale_and_translate) {
+    const matrix4x4 s = math::scaling_matrix(vector3{2, 3, 4});
+    EXPECT_TRUE(math::near_equal(math::transform_point(vector3{1, 1, 1}, s),
+                                 vector3{2, 3, 4}, epsilon));
 
-    const Matrix4x4 t = mathf::TranslationMatrix(Vector3{10, 20, 30});
-    EXPECT_TRUE(mathf::NearEqual(mathf::TransformPoint(Vector3{1, 2, 3}, t),
-                                 Vector3{11, 22, 33}, kEps));
+    const matrix4x4 t = math::translation_matrix(vector3{10, 20, 30});
+    EXPECT_TRUE(math::near_equal(math::transform_point(vector3{1, 2, 3}, t),
+                                 vector3{11, 22, 33}, epsilon));
     // A direction ignores translation; that is the whole point of the split.
-    EXPECT_TRUE(mathf::NearEqual(mathf::TransformDirection(Vector3{1, 2, 3}, t),
-                                 Vector3{1, 2, 3}, kEps));
+    EXPECT_TRUE(math::near_equal(math::transform_direction(vector3{1, 2, 3}, t),
+                                 vector3{1, 2, 3}, epsilon));
 }
 
-// Right-handed about each axis, matching the quaternion of the same angle.
-TEST(TransformBasics, AxisRotationsAreRightHandedAndMatchQuaternions) {
+// right-handed about each axis, matching the quaternion of the same angle.
+TEST(transform_basics, axis_rotations_are_right_handed_and_match_quaternions) {
     const float a = 0.7f;
-    const struct { Matrix4x4 m; Vector3 axis; const char* name; } cases[] = {
-        {mathf::RotationX(a), Vector3{1, 0, 0}, "X"},
-        {mathf::RotationY(a), Vector3{0, 1, 0}, "Y"},
-        {mathf::RotationZ(a), Vector3{0, 0, 1}, "Z"},
+    const struct { matrix4x4 m; vector3 axis; const char* name; } cases[] = {
+        {math::rotation_x(a), vector3{1, 0, 0}, "X"},
+        {math::rotation_y(a), vector3{0, 1, 0}, "Y"},
+        {math::rotation_z(a), vector3{0, 0, 1}, "Z"},
     };
     for (const auto& c : cases) {
-        EXPECT_TRUE(mathf::NearEqual(
-            c.m, mathf::RotationMatrix(mathf::QuaternionFromAxisAngle(c.axis, a)),
+        EXPECT_TRUE(math::near_equal(
+            c.m, math::rotation_matrix(math::quaternion_from_axis_angle(c.axis, a)),
             1e-5f)) << c.name;
     }
 
     // The concrete right-handed check: about +Z, +X turns toward +Y.
-    EXPECT_TRUE(mathf::NearEqual(
-        mathf::TransformDirection(Vector3{1, 0, 0},
-                                  mathf::RotationZ(mathf::kHalfPi)),
-        Vector3{0, 1, 0}, kEps));
+    EXPECT_TRUE(math::near_equal(
+        math::transform_direction(vector3{1, 0, 0},
+                                  math::rotation_z(math::half_pi)),
+        vector3{0, 1, 0}, epsilon));
 }
 
 // ------------------------------------------------------------------ TRS
 // Scale first, rotate second, translate last -- so the translation is neither
 // scaled nor rotated.
-TEST(TransformCompose, AppliesScaleThenRotationThenTranslation) {
-    const Vector3 scale{2, 2, 2};
-    const Quaternion rot =
-        mathf::QuaternionFromAxisAngle(Vector3{0, 0, 1}, mathf::kHalfPi);
-    const Vector3 translation{10, 0, 0};
+TEST(transform_compose, applies_scale_then_rotation_then_translation) {
+    const vector3 scale{2, 2, 2};
+    const quaternion rot =
+        math::quaternion_from_axis_angle(vector3{0, 0, 1}, math::half_pi);
+    const vector3 translation{10, 0, 0};
 
-    const Matrix4x4 m = mathf::Compose(scale, rot, translation);
+    const matrix4x4 m = math::compose(scale, rot, translation);
 
     // +X scales to (2,0,0), rotates to (0,2,0), translates to (10,2,0).
-    EXPECT_TRUE(mathf::NearEqual(mathf::TransformPoint(Vector3{1, 0, 0}, m),
-                                 Vector3{10, 2, 0}, kEps));
+    EXPECT_TRUE(math::near_equal(math::transform_point(vector3{1, 0, 0}, m),
+                                 vector3{10, 2, 0}, epsilon));
     // The translation must come through unscaled and unrotated.
-    EXPECT_TRUE(mathf::NearEqual(m.Translation(), translation, kEps));
+    EXPECT_TRUE(math::near_equal(m.translation(), translation, epsilon));
 }
 
-TEST(TransformCompose, MatchesTheEquivalentMatrixProduct) {
-    RandomVectors gen(kSeed + 300);
+TEST(transform_compose, matches_the_equivalent_matrix_product) {
+    random_vectors gen(random_seed + 300);
     for (int n = 0; n < 64; ++n) {
-        const Sample s = gen.Next();
-        const Vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
+        const sample s = gen.next();
+        const vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
                             std::abs(s.f[1]) * 0.05f + 0.5f,
                             std::abs(s.f[2]) * 0.05f + 0.5f};
-        const Vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
-        const Quaternion rot = mathf::QuaternionFromAxisAngle(
-            Vector3{s.f[0], s.f[1], s.f[2] + 1.0f}, s.f[3] * 0.02f);
+        const vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
+        const quaternion rot = math::quaternion_from_axis_angle(
+            vector3{s.f[0], s.f[1], s.f[2] + 1.0f}, s.f[3] * 0.02f);
 
-        const Matrix4x4 built = mathf::Compose(scale, rot, translation);
-        const Matrix4x4 product = mathf::ScalingMatrix(scale) *
-                                  mathf::RotationMatrix(rot) *
-                                  mathf::TranslationMatrix(translation);
-        EXPECT_TRUE(mathf::NearEqual(built, product, 1e-4f)) << n;
+        const matrix4x4 built = math::compose(scale, rot, translation);
+        const matrix4x4 product = math::scaling_matrix(scale) *
+                                  math::rotation_matrix(rot) *
+                                  math::translation_matrix(translation);
+        EXPECT_TRUE(math::near_equal(built, product, 1e-4f)) << n;
     }
 }
 
-TEST(TransformDecompose, RoundTripsWhatComposeBuilt) {
-    RandomVectors gen(kSeed + 301);
+TEST(transform_decompose, round_trips_what_compose_built) {
+    random_vectors gen(random_seed + 301);
     for (int n = 0; n < 128; ++n) {
-        const Sample s = gen.Next();
-        const Vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
+        const sample s = gen.next();
+        const vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
                             std::abs(s.f[1]) * 0.05f + 0.5f,
                             std::abs(s.f[2]) * 0.05f + 0.5f};
-        const Vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
-        const Quaternion rot = mathf::Normalize(mathf::QuaternionFromAxisAngle(
-            Vector3{s.f[0], s.f[1], s.f[2] + 1.0f}, s.f[3] * 0.02f));
+        const vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
+        const quaternion rot = math::normalize(math::quaternion_from_axis_angle(
+            vector3{s.f[0], s.f[1], s.f[2] + 1.0f}, s.f[3] * 0.02f));
 
-        const Matrix4x4 m = mathf::Compose(scale, rot, translation);
+        const matrix4x4 m = math::compose(scale, rot, translation);
 
-        Vector3 outScale, outTranslation;
-        Quaternion outRot;
-        ASSERT_TRUE(mathf::Decompose(m, outScale, outRot, outTranslation)) << n;
+        vector3 out_scale, out_translation;
+        quaternion out_rot;
+        ASSERT_TRUE(math::decompose(m, out_scale, out_rot, out_translation)) << n;
 
-        EXPECT_TRUE(mathf::NearEqual(outScale, scale, 1e-3f)) << n;
-        EXPECT_TRUE(mathf::NearEqual(outTranslation, translation, 1e-4f)) << n;
-        EXPECT_TRUE(mathf::SameRotation(outRot, rot, 1e-3f)) << n;
+        EXPECT_TRUE(math::near_equal(out_scale, scale, 1e-3f)) << n;
+        EXPECT_TRUE(math::near_equal(out_translation, translation, 1e-4f)) << n;
+        EXPECT_TRUE(math::same_rotation(out_rot, rot, 1e-3f)) << n;
 
         // The one that has to hold even where the parts are ambiguous.
-        EXPECT_TRUE(mathf::NearEqual(
-            mathf::Compose(outScale, outRot, outTranslation), m, 1e-3f)) << n;
+        EXPECT_TRUE(math::near_equal(
+            math::compose(out_scale, out_rot, out_translation), m, 1e-3f)) << n;
     }
 }
 
 // A rotation matrix has determinant +1, so a mirror cannot be one. The
 // convention is to fold the reflection into a negative X scale; what must hold
 // is that recomposing reproduces the original matrix.
-TEST(TransformDecompose, FoldsAReflectionIntoNegativeScale) {
-    for (const Vector3 mirror : {Vector3{-1, 1, 1}, Vector3{1, -1, 1},
-                                 Vector3{1, 1, -1}}) {
-        const Matrix4x4 m = mathf::ScalingMatrix(mirror);
-        Vector3 scale, translation;
-        Quaternion rot;
-        ASSERT_TRUE(mathf::Decompose(m, scale, rot, translation));
+TEST(transform_decompose, folds_a_reflection_into_negative_scale) {
+    for (const vector3 mirror : {vector3{-1, 1, 1}, vector3{1, -1, 1},
+                                 vector3{1, 1, -1}}) {
+        const matrix4x4 m = math::scaling_matrix(mirror);
+        vector3 scale, translation;
+        quaternion rot;
+        ASSERT_TRUE(math::decompose(m, scale, rot, translation));
 
         EXPECT_LT(scale.x * scale.y * scale.z, 0.0f)
             << "the reflection has to survive somewhere in the scale";
-        EXPECT_TRUE(mathf::NearEqual(
-            mathf::Compose(scale, rot, translation), m, 1e-5f));
+        EXPECT_TRUE(math::near_equal(
+            math::compose(scale, rot, translation), m, 1e-5f));
     }
 }
 
@@ -160,28 +160,28 @@ TEST(TransformDecompose, FoldsAReflectionIntoNegativeScale) {
 // the det<0 fold's interaction with Shepperd's method is invisible. The angle is
 // near pi on purpose, so the quaternion extraction runs a trace<0 branch at the
 // same time. This is Phase 3's identity-times-identity lesson applied here.
-TEST(TransformDecompose, FoldsReflectionCombinedWithRotation) {
-    const struct { Vector3 scale; Vector3 axis; float angle; } cases[] = {
+TEST(transform_decompose, folds_reflection_combined_with_rotation) {
+    const struct { vector3 scale; vector3 axis; float angle; } cases[] = {
         {{-2, 3, 4}, {1, 2, 3}, 2.5f},
         {{2, -3, 4}, {0, 1, 0}, 3.1f},
         {{2, 3, -4}, {1, 0, 1}, 0.7f},
         {{-1, -2, -3}, {1, 1, 1}, 2.9f},   // det = -6: odd reflection count
     };
     for (const auto& c : cases) {
-        const Quaternion rot = mathf::QuaternionFromAxisAngle(c.axis, c.angle);
-        const Vector3 translation{5, -1, 2};
-        const Matrix4x4 m = mathf::Compose(c.scale, rot, translation);
+        const quaternion rot = math::quaternion_from_axis_angle(c.axis, c.angle);
+        const vector3 translation{5, -1, 2};
+        const matrix4x4 m = math::compose(c.scale, rot, translation);
 
-        Vector3 outScale, outTranslation;
-        Quaternion outRot;
-        ASSERT_TRUE(mathf::Decompose(m, outScale, outRot, outTranslation));
+        vector3 out_scale, out_translation;
+        quaternion out_rot;
+        ASSERT_TRUE(math::decompose(m, out_scale, out_rot, out_translation));
 
-        EXPECT_LT(outScale.x * outScale.y * outScale.z, 0.0f)
+        EXPECT_LT(out_scale.x * out_scale.y * out_scale.z, 0.0f)
             << "the reflection must survive in the scale's sign";
         // Which axis carries the mirror is a convention, not a recovery -- the
         // one thing that must hold is that the parts recompose to the original.
-        EXPECT_TRUE(mathf::NearEqual(
-            mathf::Compose(outScale, outRot, outTranslation), m, 1e-3f))
+        EXPECT_TRUE(math::near_equal(
+            math::compose(out_scale, out_rot, out_translation), m, 1e-3f))
             << "scale (" << c.scale.x << "," << c.scale.y << "," << c.scale.z
             << ") angle " << c.angle;
     }
@@ -189,46 +189,46 @@ TEST(TransformDecompose, FoldsReflectionCombinedWithRotation) {
 
 // A zero scale destroys the direction of a basis vector; no rotation can be
 // recovered from it, so the function says so instead of guessing.
-TEST(TransformDecompose, RejectsDegenerateMatrices) {
-    Vector3 scale, translation;
-    Quaternion rot;
+TEST(transform_decompose, rejects_degenerate_matrices) {
+    vector3 scale, translation;
+    quaternion rot;
 
-    EXPECT_FALSE(mathf::Decompose(mathf::ScalingMatrix(Vector3{1, 0, 1}), scale,
+    EXPECT_FALSE(math::decompose(math::scaling_matrix(vector3{1, 0, 1}), scale,
                                   rot, translation));
-    EXPECT_FALSE(mathf::Decompose(mathf::ScalingMatrix(Vector3{0, 0, 0}), scale,
+    EXPECT_FALSE(math::decompose(math::scaling_matrix(vector3{0, 0, 0}), scale,
                                   rot, translation));
-    EXPECT_FALSE(mathf::Decompose(Matrix4x4{}, scale, rot, translation))
+    EXPECT_FALSE(math::decompose(matrix4x4{}, scale, rot, translation))
         << "an all-zero matrix has no decomposition";
 
-    Matrix4x4 withNan = Matrix4x4::Identity();
-    withNan.m[1][1] = QuietNaN();
-    EXPECT_FALSE(mathf::Decompose(withNan, scale, rot, translation));
+    matrix4x4 with_nan = matrix4x4::identity();
+    with_nan.m[1][1] = quiet_nan();
+    EXPECT_FALSE(math::decompose(with_nan, scale, rot, translation));
 }
 
 // ------------------------------------------------------------------- view
 // The defining property: the camera's own position lands at the origin, and the
 // direction it faces lands on +Z (left-handed) or -Z (right-handed).
-TEST(TransformView, PlacesTheEyeAtTheOrigin) {
-    const Vector3 eye{3, 4, -5};
-    const Vector3 target{1, 0, 2};
-    const Vector3 up{0, 1, 0};
+TEST(transform_view, places_the_eye_at_the_origin) {
+    const vector3 eye{3, 4, -5};
+    const vector3 target{1, 0, 2};
+    const vector3 up{0, 1, 0};
 
-    for (const Matrix4x4& view : {mathf::LookAtLH(eye, target, up),
-                                  mathf::LookAtRH(eye, target, up)}) {
-        EXPECT_TRUE(mathf::NearEqual(mathf::TransformPoint(eye, view),
-                                     Vector3{0, 0, 0}, 1e-4f));
+    for (const matrix4x4& view : {math::look_at_lh(eye, target, up),
+                                  math::look_at_rh(eye, target, up)}) {
+        EXPECT_TRUE(math::near_equal(math::transform_point(eye, view),
+                                     vector3{0, 0, 0}, 1e-4f));
     }
 }
 
-TEST(TransformView, HandednessDecidesWhichWayTheCameraLooks) {
-    const Vector3 eye{0, 0, -5};
-    const Vector3 target{0, 0, 0};
-    const Vector3 up{0, 1, 0};
+TEST(transform_view, handedness_decides_which_way_the_camera_looks) {
+    const vector3 eye{0, 0, -5};
+    const vector3 target{0, 0, 0};
+    const vector3 up{0, 1, 0};
 
     // The target sits five units in front of the camera either way; the sign of
     // the view-space z is what the handedness decides.
-    const Vector3 lh = mathf::TransformPoint(target, mathf::LookAtLH(eye, target, up));
-    const Vector3 rh = mathf::TransformPoint(target, mathf::LookAtRH(eye, target, up));
+    const vector3 lh = math::transform_point(target, math::look_at_lh(eye, target, up));
+    const vector3 rh = math::transform_point(target, math::look_at_rh(eye, target, up));
 
     EXPECT_NEAR(lh.z, 5.0f, 1e-4f) << "left-handed looks down +Z";
     EXPECT_NEAR(rh.z, -5.0f, 1e-4f) << "right-handed looks down -Z";
@@ -237,82 +237,82 @@ TEST(TransformView, HandednessDecidesWhichWayTheCameraLooks) {
 // Looking straight up with the conventional world up -- an easy real mistake --
 // makes forward parallel to up, the cross collapses, and before the guard this
 // returned a matrix with two zero basis columns that silently flattened the
-// scene. Identity on degenerate input is the library-wide policy (singular
-// Inverse, zero Normalize), and now the view matrices follow it too.
-TEST(TransformView, ParallelUpAndForwardReturnsIdentity) {
-    const Vector3 up{0, 1, 0};
-    EXPECT_TRUE(mathf::LookAtLH(Vector3{0, 0, 0}, Vector3{0, 5, 0}, up) ==
-                Matrix4x4::Identity());
-    EXPECT_TRUE(mathf::LookAtRH(Vector3{0, 0, 0}, Vector3{0, -5, 0}, up) ==
-                Matrix4x4::Identity());
-    EXPECT_TRUE(mathf::LookToLH(Vector3{1, 2, 3}, Vector3{0, -1, 0}, up) ==
-                Matrix4x4::Identity());
+// scene. identity on degenerate input is the library-wide policy (singular
+// inverse, zero normalize), and now the view matrices follow it too.
+TEST(transform_view, parallel_up_and_forward_returns_identity) {
+    const vector3 up{0, 1, 0};
+    EXPECT_TRUE(math::look_at_lh(vector3{0, 0, 0}, vector3{0, 5, 0}, up) ==
+                matrix4x4::identity());
+    EXPECT_TRUE(math::look_at_rh(vector3{0, 0, 0}, vector3{0, -5, 0}, up) ==
+                matrix4x4::identity());
+    EXPECT_TRUE(math::look_to_lh(vector3{1, 2, 3}, vector3{0, -1, 0}, up) ==
+                matrix4x4::identity());
     // A zero direction has no view to describe either.
-    EXPECT_TRUE(mathf::LookToLH(Vector3{1, 2, 3}, Vector3{0, 0, 0}, up) ==
-                Matrix4x4::Identity());
-    // And barely-not-parallel still produces a real view matrix.
-    EXPECT_FALSE(mathf::LookAtLH(Vector3{0, 0, 0}, Vector3{0.01f, 5, 0}, up) ==
-                 Matrix4x4::Identity());
+    EXPECT_TRUE(math::look_to_lh(vector3{1, 2, 3}, vector3{0, 0, 0}, up) ==
+                matrix4x4::identity());
+    // bit_and barely-not-parallel still produces a real view matrix.
+    EXPECT_FALSE(math::look_at_lh(vector3{0, 0, 0}, vector3{0.01f, 5, 0}, up) ==
+                 matrix4x4::identity());
 }
 
-TEST(TransformView, LookAtAndLookToAgree) {
-    const Vector3 eye{2, -1, 4};
-    const Vector3 target{-3, 5, 0};
-    const Vector3 up{0, 1, 0};
-    const Vector3 direction = target - eye;
+TEST(transform_view, look_at_and_look_to_agree) {
+    const vector3 eye{2, -1, 4};
+    const vector3 target{-3, 5, 0};
+    const vector3 up{0, 1, 0};
+    const vector3 direction = target - eye;
 
-    EXPECT_TRUE(mathf::NearEqual(mathf::LookAtLH(eye, target, up),
-                                 mathf::LookToLH(eye, direction, up), 1e-5f));
-    EXPECT_TRUE(mathf::NearEqual(mathf::LookAtRH(eye, target, up),
-                                 mathf::LookToRH(eye, direction, up), 1e-5f));
+    EXPECT_TRUE(math::near_equal(math::look_at_lh(eye, target, up),
+                                 math::look_to_lh(eye, direction, up), 1e-5f));
+    EXPECT_TRUE(math::near_equal(math::look_at_rh(eye, target, up),
+                                 math::look_to_rh(eye, direction, up), 1e-5f));
 }
 
 // A view matrix is a rigid motion, so it must not stretch anything.
-TEST(TransformView, PreservesDistances) {
-    const Matrix4x4 view =
-        mathf::LookAtLH(Vector3{5, 2, -3}, Vector3{0, 1, 1}, Vector3{0, 1, 0});
-    RandomVectors gen(kSeed + 302);
+TEST(transform_view, preserves_distances) {
+    const matrix4x4 view =
+        math::look_at_lh(vector3{5, 2, -3}, vector3{0, 1, 1}, vector3{0, 1, 0});
+    random_vectors gen(random_seed + 302);
     for (int n = 0; n < 32; ++n) {
-        const Sample s = gen.Next();
-        const Vector3 a{s.f[0], s.f[1], s.f[2]};
-        const Sample s2 = gen.Next();
-        const Vector3 b{s2.f[0], s2.f[1], s2.f[2]};
+        const sample s = gen.next();
+        const vector3 a{s.f[0], s.f[1], s.f[2]};
+        const sample s2 = gen.next();
+        const vector3 b{s2.f[0], s2.f[1], s2.f[2]};
 
-        EXPECT_NEAR(mathf::Distance(mathf::TransformPoint(a, view),
-                                    mathf::TransformPoint(b, view)),
-                    mathf::Distance(a, b), 1e-2f) << n;
+        EXPECT_NEAR(math::distance(math::transform_point(a, view),
+                                    math::transform_point(b, view)),
+                    math::distance(a, b), 1e-2f) << n;
     }
 }
 
 // ------------------------------------------------------------- projection
 // Direct3D depth: the near plane is 0 and the far plane is 1, not -1 and 1.
-TEST(TransformProjection, DepthRunsFromZeroAtNearToOneAtFar) {
-    const float nearZ = 0.5f, farZ = 250.0f;
+TEST(transform_projection, depth_runs_from_zero_at_near_to_one_at_far) {
+    const float near_z = 0.5f, far_z = 250.0f;
 
-    const Matrix4x4 lh = mathf::PerspectiveFovLH(mathf::kHalfPi, 1.6f, nearZ, farZ);
-    EXPECT_NEAR(Project(Vector3{0, 0, nearZ}, lh).z, 0.0f, 1e-4f);
-    EXPECT_NEAR(Project(Vector3{0, 0, farZ}, lh).z, 1.0f, 1e-4f);
+    const matrix4x4 lh = math::perspective_fov_lh(math::half_pi, 1.6f, near_z, far_z);
+    EXPECT_NEAR(project(vector3{0, 0, near_z}, lh).z, 0.0f, 1e-4f);
+    EXPECT_NEAR(project(vector3{0, 0, far_z}, lh).z, 1.0f, 1e-4f);
 
-    const Matrix4x4 rh = mathf::PerspectiveFovRH(mathf::kHalfPi, 1.6f, nearZ, farZ);
-    EXPECT_NEAR(Project(Vector3{0, 0, -nearZ}, rh).z, 0.0f, 1e-4f);
-    EXPECT_NEAR(Project(Vector3{0, 0, -farZ}, rh).z, 1.0f, 1e-4f);
+    const matrix4x4 rh = math::perspective_fov_rh(math::half_pi, 1.6f, near_z, far_z);
+    EXPECT_NEAR(project(vector3{0, 0, -near_z}, rh).z, 0.0f, 1e-4f);
+    EXPECT_NEAR(project(vector3{0, 0, -far_z}, rh).z, 1.0f, 1e-4f);
 
-    const Matrix4x4 ol = mathf::OrthographicLH(4, 4, nearZ, farZ);
-    EXPECT_NEAR(Project(Vector3{0, 0, nearZ}, ol).z, 0.0f, 1e-4f);
-    EXPECT_NEAR(Project(Vector3{0, 0, farZ}, ol).z, 1.0f, 1e-4f);
+    const matrix4x4 ol = math::orthographic_lh(4, 4, near_z, far_z);
+    EXPECT_NEAR(project(vector3{0, 0, near_z}, ol).z, 0.0f, 1e-4f);
+    EXPECT_NEAR(project(vector3{0, 0, far_z}, ol).z, 1.0f, 1e-4f);
 
-    const Matrix4x4 orr = mathf::OrthographicRH(4, 4, nearZ, farZ);
-    EXPECT_NEAR(Project(Vector3{0, 0, -nearZ}, orr).z, 0.0f, 1e-4f);
-    EXPECT_NEAR(Project(Vector3{0, 0, -farZ}, orr).z, 1.0f, 1e-4f);
+    const matrix4x4 orr = math::orthographic_rh(4, 4, near_z, far_z);
+    EXPECT_NEAR(project(vector3{0, 0, -near_z}, orr).z, 0.0f, 1e-4f);
+    EXPECT_NEAR(project(vector3{0, 0, -far_z}, orr).z, 1.0f, 1e-4f);
 }
 
 // Depth must increase monotonically with distance, or the depth buffer sorts
 // backwards -- the classic symptom of a swapped near and far.
-TEST(TransformProjection, DepthIncreasesWithDistance) {
-    const Matrix4x4 p = mathf::PerspectiveFovLH(1.0f, 1.777f, 0.1f, 1000.0f);
+TEST(transform_projection, depth_increases_with_distance) {
+    const matrix4x4 p = math::perspective_fov_lh(1.0f, 1.777f, 0.1f, 1000.0f);
     float previous = -1.0f;
     for (float z = 0.1f; z < 1000.0f; z *= 1.7f) {
-        const float depth = Project(Vector3{0, 0, z}, p).z;
+        const float depth = project(vector3{0, 0, z}, p).z;
         EXPECT_GT(depth, previous) << "at z = " << z;
         EXPECT_GE(depth, -1e-5f);
         EXPECT_LE(depth, 1.0f + 1e-5f);
@@ -322,179 +322,179 @@ TEST(TransformProjection, DepthIncreasesWithDistance) {
 
 // The field of view has to be the angle it claims: at the near plane, a point on
 // the edge of the vertical field lands exactly on the top of the clip cube.
-TEST(TransformProjection, FieldOfViewIsTheAngleItClaims) {
+TEST(transform_projection, field_of_view_is_the_angle_it_claims) {
     const float fov = 1.2f;
     const float aspect = 1.5f;
-    const float nearZ = 2.0f;
-    const Matrix4x4 p = mathf::PerspectiveFovLH(fov, aspect, nearZ, 100.0f);
+    const float near_z = 2.0f;
+    const matrix4x4 p = math::perspective_fov_lh(fov, aspect, near_z, 100.0f);
 
     // Half the vertical field, at the near plane.
-    const float halfHeight = nearZ * mathf::Tan(fov * 0.5f);
-    EXPECT_NEAR(Project(Vector3{0, halfHeight, nearZ}, p).y, 1.0f, 1e-4f);
-    EXPECT_NEAR(Project(Vector3{0, -halfHeight, nearZ}, p).y, -1.0f, 1e-4f);
+    const float half_height = near_z * math::tan(fov * 0.5f);
+    EXPECT_NEAR(project(vector3{0, half_height, near_z}, p).y, 1.0f, 1e-4f);
+    EXPECT_NEAR(project(vector3{0, -half_height, near_z}, p).y, -1.0f, 1e-4f);
 
     // The horizontal field is the vertical one widened by the aspect ratio.
-    const float halfWidth = halfHeight * aspect;
-    EXPECT_NEAR(Project(Vector3{halfWidth, 0, nearZ}, p).x, 1.0f, 1e-4f);
+    const float half_width = half_height * aspect;
+    EXPECT_NEAR(project(vector3{half_width, 0, near_z}, p).x, 1.0f, 1e-4f);
 }
 
-TEST(TransformProjection, OrthographicMapsTheBoxToTheClipCube) {
-    const Matrix4x4 p = mathf::OrthographicLH(8.0f, 6.0f, 1.0f, 51.0f);
-    EXPECT_TRUE(mathf::NearEqual(Project(Vector3{4, 3, 1}, p), Vector3{1, 1, 0},
+TEST(transform_projection, orthographic_maps_the_box_to_the_clip_cube) {
+    const matrix4x4 p = math::orthographic_lh(8.0f, 6.0f, 1.0f, 51.0f);
+    EXPECT_TRUE(math::near_equal(project(vector3{4, 3, 1}, p), vector3{1, 1, 0},
                                  1e-4f));
-    EXPECT_TRUE(mathf::NearEqual(Project(Vector3{-4, -3, 51}, p),
-                                 Vector3{-1, -1, 1}, 1e-4f));
+    EXPECT_TRUE(math::near_equal(project(vector3{-4, -3, 51}, p),
+                                 vector3{-1, -1, 1}, 1e-4f));
     // Unlike a perspective projection, parallel lines stay parallel: doubling x
     // doubles the projected x regardless of depth.
-    EXPECT_NEAR(Project(Vector3{2, 0, 30}, p).x,
-                Project(Vector3{2, 0, 5}, p).x, 1e-5f);
+    EXPECT_NEAR(project(vector3{2, 0, 30}, p).x,
+                project(vector3{2, 0, 5}, p).x, 1e-5f);
 }
 
-TEST(TransformProjection, OffCenterMatchesCenteredWhenSymmetric) {
-    const Matrix4x4 centered = mathf::OrthographicLH(8.0f, 6.0f, 1.0f, 51.0f);
-    const Matrix4x4 offCenter =
-        mathf::OrthographicOffCenterLH(-4.0f, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f);
-    EXPECT_TRUE(mathf::NearEqual(centered, offCenter, 1e-5f));
+TEST(transform_projection, off_center_matches_centered_when_symmetric) {
+    const matrix4x4 centered = math::orthographic_lh(8.0f, 6.0f, 1.0f, 51.0f);
+    const matrix4x4 off_center =
+        math::orthographic_off_center_lh(-4.0f, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f);
+    EXPECT_TRUE(math::near_equal(centered, off_center, 1e-5f));
 
-    const Matrix4x4 centeredRh = mathf::OrthographicRH(8.0f, 6.0f, 1.0f, 51.0f);
-    const Matrix4x4 offCenterRh =
-        mathf::OrthographicOffCenterRH(-4.0f, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f);
-    EXPECT_TRUE(mathf::NearEqual(centeredRh, offCenterRh, 1e-5f));
+    const matrix4x4 centered_rh = math::orthographic_rh(8.0f, 6.0f, 1.0f, 51.0f);
+    const matrix4x4 off_center_rh =
+        math::orthographic_off_center_rh(-4.0f, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f);
+    EXPECT_TRUE(math::near_equal(centered_rh, off_center_rh, 1e-5f));
 }
 
 // An asymmetric frustum is the point of the off-center form; a symmetric test
 // alone would not notice the offset terms being dropped.
-TEST(TransformProjection, OffCenterHandlesAnAsymmetricBox) {
-    const Matrix4x4 p =
-        mathf::OrthographicOffCenterLH(-1.0f, 7.0f, 2.0f, 8.0f, 1.0f, 11.0f);
-    EXPECT_TRUE(mathf::NearEqual(Project(Vector3{-1, 2, 1}, p),
-                                 Vector3{-1, -1, 0}, 1e-4f));
-    EXPECT_TRUE(mathf::NearEqual(Project(Vector3{7, 8, 11}, p),
-                                 Vector3{1, 1, 1}, 1e-4f));
-    EXPECT_TRUE(mathf::NearEqual(Project(Vector3{3, 5, 1}, p),
-                                 Vector3{0, 0, 0}, 1e-4f))
+TEST(transform_projection, off_center_handles_an_asymmetric_box) {
+    const matrix4x4 p =
+        math::orthographic_off_center_lh(-1.0f, 7.0f, 2.0f, 8.0f, 1.0f, 11.0f);
+    EXPECT_TRUE(math::near_equal(project(vector3{-1, 2, 1}, p),
+                                 vector3{-1, -1, 0}, 1e-4f));
+    EXPECT_TRUE(math::near_equal(project(vector3{7, 8, 11}, p),
+                                 vector3{1, 1, 1}, 1e-4f));
+    EXPECT_TRUE(math::near_equal(project(vector3{3, 5, 1}, p),
+                                 vector3{0, 0, 0}, 1e-4f))
         << "the centre of the box maps to the centre of the near face";
 }
 
 // The two ways to spell the same perspective projection.
-TEST(TransformProjection, FovAndSizeFormsAgree) {
-    const float fov = 0.9f, nearZ = 0.75f, farZ = 300.0f, aspect = 16.0f / 9.0f;
-    const float height = 2.0f * nearZ * mathf::Tan(fov * 0.5f);
+TEST(transform_projection, fov_and_size_forms_agree) {
+    const float fov = 0.9f, near_z = 0.75f, far_z = 300.0f, aspect = 16.0f / 9.0f;
+    const float height = 2.0f * near_z * math::tan(fov * 0.5f);
     const float width = height * aspect;
 
-    EXPECT_TRUE(mathf::NearEqual(mathf::PerspectiveFovLH(fov, aspect, nearZ, farZ),
-                                 mathf::PerspectiveLH(width, height, nearZ, farZ),
+    EXPECT_TRUE(math::near_equal(math::perspective_fov_lh(fov, aspect, near_z, far_z),
+                                 math::perspective_lh(width, height, near_z, far_z),
                                  1e-4f));
-    EXPECT_TRUE(mathf::NearEqual(mathf::PerspectiveFovRH(fov, aspect, nearZ, farZ),
-                                 mathf::PerspectiveRH(width, height, nearZ, farZ),
+    EXPECT_TRUE(math::near_equal(math::perspective_fov_rh(fov, aspect, near_z, far_z),
+                                 math::perspective_rh(width, height, near_z, far_z),
                                  1e-4f));
 }
 
 // The handed pairs must actually differ, or one of them is quietly wrong.
-TEST(TransformProjection, HandednessPairsAreNotTheSameMatrix) {
-    EXPECT_FALSE(mathf::NearEqual(mathf::PerspectiveFovLH(1.0f, 1.5f, 1, 100),
-                                  mathf::PerspectiveFovRH(1.0f, 1.5f, 1, 100),
+TEST(transform_projection, handedness_pairs_are_not_the_same_matrix) {
+    EXPECT_FALSE(math::near_equal(math::perspective_fov_lh(1.0f, 1.5f, 1, 100),
+                                  math::perspective_fov_rh(1.0f, 1.5f, 1, 100),
                                   1e-3f));
-    EXPECT_FALSE(mathf::NearEqual(mathf::OrthographicLH(4, 4, 1, 100),
-                                  mathf::OrthographicRH(4, 4, 1, 100), 1e-3f));
-    EXPECT_FALSE(mathf::NearEqual(
-        mathf::LookAtLH(Vector3{0, 0, -5}, Vector3{}, Vector3{0, 1, 0}),
-        mathf::LookAtRH(Vector3{0, 0, -5}, Vector3{}, Vector3{0, 1, 0}), 1e-3f));
+    EXPECT_FALSE(math::near_equal(math::orthographic_lh(4, 4, 1, 100),
+                                  math::orthographic_rh(4, 4, 1, 100), 1e-3f));
+    EXPECT_FALSE(math::near_equal(
+        math::look_at_lh(vector3{0, 0, -5}, vector3{}, vector3{0, 1, 0}),
+        math::look_at_rh(vector3{0, 0, -5}, vector3{}, vector3{0, 1, 0}), 1e-3f));
 }
 
 // ------------------------------------------------------------------- constexpr
-static_assert(mathf::ScalingMatrix(Vector3{2, 3, 4})(1, 1) == 3.0f);
-static_assert(mathf::TranslationMatrix(Vector3{5, 6, 7})(3, 1) == 6.0f);
-static_assert(mathf::RotationZ(0.0f) == Matrix4x4::Identity());
+static_assert(math::scaling_matrix(vector3{2, 3, 4})(1, 1) == 3.0f);
+static_assert(math::translation_matrix(vector3{5, 6, 7})(3, 1) == 6.0f);
+static_assert(math::rotation_z(0.0f) == matrix4x4::identity());
 
-constexpr Matrix4x4 kCompileTimeTrs =
-    mathf::Compose(Vector3{2, 2, 2},
-                   mathf::QuaternionFromAxisAngle(Vector3{0, 0, 1},
-                                                  mathf::kHalfPi),
-                   Vector3{10, 0, 0});
-static_assert(kCompileTimeTrs.m[3][0] == 10.0f);
-static_assert(kCompileTimeTrs.m[0][1] > 1.999f);   // scale 2, quarter turn
+constexpr matrix4x4 compile_time_trs =
+    math::compose(vector3{2, 2, 2},
+                   math::quaternion_from_axis_angle(vector3{0, 0, 1},
+                                                  math::half_pi),
+                   vector3{10, 0, 0});
+static_assert(compile_time_trs.m[3][0] == 10.0f);
+static_assert(compile_time_trs.m[0][1] > 1.999f);   // scale 2, quarter turn
 
-constexpr Matrix4x4 kCompileTimeProj =
-    mathf::PerspectiveFovLH(mathf::kHalfPi, 1.0f, 1.0f, 100.0f);
-static_assert(kCompileTimeProj.m[2][3] == 1.0f);
-static_assert(kCompileTimeProj.m[3][3] == 0.0f);
+constexpr matrix4x4 compile_time_projection =
+    math::perspective_fov_lh(math::half_pi, 1.0f, 1.0f, 100.0f);
+static_assert(compile_time_projection.m[2][3] == 1.0f);
+static_assert(compile_time_projection.m[3][3] == 0.0f);
 
-constexpr Matrix4x4 kCompileTimeView =
-    mathf::LookAtLH(Vector3{0, 0, -5}, Vector3{0, 0, 0}, Vector3{0, 1, 0});
-static_assert(kCompileTimeView.m[3][2] > 4.999f);
+constexpr matrix4x4 compile_time_view =
+    math::look_at_lh(vector3{0, 0, -5}, vector3{0, 0, 0}, vector3{0, 1, 0});
+static_assert(compile_time_view.m[3][2] > 4.999f);
 
-// The rest of the constexpr surface, proven rather than presumed. Decompose
+// The rest of the constexpr surface, proven rather than presumed. decompose
 // takes out-parameters, so it gets a wrapper function.
-static_assert(mathf::RotationX(0.5f)(1, 1) > 0.87f);
-static_assert(mathf::RotationY(0.5f)(0, 0) > 0.87f);
-static_assert(mathf::RotationZ(0.5f)(0, 1) > 0.47f);
-static_assert(mathf::ScalingMatrix(2.0f)(2, 2) == 2.0f);
-static_assert(mathf::LookAtRH(Vector3{0, 0, -5}, Vector3{}, Vector3{0, 1, 0})
+static_assert(math::rotation_x(0.5f)(1, 1) > 0.87f);
+static_assert(math::rotation_y(0.5f)(0, 0) > 0.87f);
+static_assert(math::rotation_z(0.5f)(0, 1) > 0.47f);
+static_assert(math::scaling_matrix(2.0f)(2, 2) == 2.0f);
+static_assert(math::look_at_rh(vector3{0, 0, -5}, vector3{}, vector3{0, 1, 0})
                   .m[2][2] < 0.0f);
-static_assert(mathf::LookToLH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0}) ==
-              Matrix4x4::Identity());
+static_assert(math::look_to_lh(vector3{}, vector3{0, 0, 1}, vector3{0, 1, 0}) ==
+              matrix4x4::identity());
 // RH negates the direction on the way in, so looking along +Z puts -1 in the
 // basis -- the entry that distinguishes it from the LH form given the same
 // direction.
-static_assert(mathf::LookToRH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0})
+static_assert(math::look_to_rh(vector3{}, vector3{0, 0, 1}, vector3{0, 1, 0})
                   .m[2][2] < 0.0f);
-static_assert(mathf::LookToLH(Vector3{}, Vector3{0, 0, 1}, Vector3{0, 1, 0})
+static_assert(math::look_to_lh(vector3{}, vector3{0, 0, 1}, vector3{0, 1, 0})
                   .m[2][2] > 0.0f);
-static_assert(mathf::OrthographicLH(4, 4, 1, 10)(0, 0) == 0.5f);
-static_assert(mathf::OrthographicRH(4, 4, 1, 10)(2, 2) < 0.0f);
-static_assert(mathf::OrthographicOffCenterLH(-1, 7, 2, 8, 1, 11)(3, 0) == -0.75f);
-static_assert(mathf::OrthographicOffCenterRH(-1, 7, 2, 8, 1, 11)(0, 0) == 0.25f);
-static_assert(mathf::PerspectiveLH(2, 2, 1, 100)(0, 0) == 1.0f);
-static_assert(mathf::PerspectiveRH(2, 2, 1, 100)(2, 3) == -1.0f);
+static_assert(math::orthographic_lh(4, 4, 1, 10)(0, 0) == 0.5f);
+static_assert(math::orthographic_rh(4, 4, 1, 10)(2, 2) < 0.0f);
+static_assert(math::orthographic_off_center_lh(-1, 7, 2, 8, 1, 11)(3, 0) == -0.75f);
+static_assert(math::orthographic_off_center_rh(-1, 7, 2, 8, 1, 11)(0, 0) == 0.25f);
+static_assert(math::perspective_lh(2, 2, 1, 100)(0, 0) == 1.0f);
+static_assert(math::perspective_rh(2, 2, 1, 100)(2, 3) == -1.0f);
 
 namespace {
-constexpr float CompileTimeDecompose() {
-    Vector3 scale, translation;
-    Quaternion rot;
-    const bool ok = mathf::Decompose(
-        mathf::Compose(Vector3{2, 3, 4}, Quaternion::Identity(),
-                       Vector3{5, 6, 7}),
+constexpr float compile_time_decompose() {
+    vector3 scale, translation;
+    quaternion rot;
+    const bool ok = math::decompose(
+        math::compose(vector3{2, 3, 4}, quaternion::identity(),
+                       vector3{5, 6, 7}),
         scale, rot, translation);
     return ok ? scale.y + translation.z : -1.0f;   // 3 + 7
 }
 } // namespace
-static_assert(CompileTimeDecompose() == 10.0f);
+static_assert(compile_time_decompose() == 10.0f);
 
 // In ULP, for the reason given on the quaternion version: Clang may fuse a
 // multiply-add at run time that constant evaluation computed unfused.
-TEST(TransformConstexpr, CompileTimeMatchesRuntimeToWithinAFewUlp) {
-    auto Compare = [](const Matrix4x4& a, const Matrix4x4& b, const char* what) {
+TEST(transform_constexpr, compile_time_matches_runtime_to_within_a_few_ulp) {
+    auto compare = [](const matrix4x4& a, const matrix4x4& b, const char* what) {
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
-                EXPECT_TRUE(SameToWithin(a.m[i][j], b.m[i][j])) << what << " at " << i << "," << j;
+                EXPECT_TRUE(same_to_within(a.m[i][j], b.m[i][j])) << what << " at " << i << "," << j;
             }
         }
     };
 
-    Compare(mathf::Compose(
-                Vector3{Opaque(2.0f), Opaque(2.0f), Opaque(2.0f)},
-                mathf::QuaternionFromAxisAngle(
-                    Vector3{Opaque(0.0f), Opaque(0.0f), Opaque(1.0f)},
-                    Opaque(mathf::kHalfPi)),
-                Vector3{Opaque(10.0f), Opaque(0.0f), Opaque(0.0f)}),
-            kCompileTimeTrs, "Compose");
+    compare(math::compose(
+                vector3{opaque(2.0f), opaque(2.0f), opaque(2.0f)},
+                math::quaternion_from_axis_angle(
+                    vector3{opaque(0.0f), opaque(0.0f), opaque(1.0f)},
+                    opaque(math::half_pi)),
+                vector3{opaque(10.0f), opaque(0.0f), opaque(0.0f)}),
+            compile_time_trs, "compose");
 
-    Compare(mathf::PerspectiveFovLH(Opaque(mathf::kHalfPi), Opaque(1.0f),
-                                    Opaque(1.0f), Opaque(100.0f)),
-            kCompileTimeProj, "PerspectiveFovLH");
+    compare(math::perspective_fov_lh(opaque(math::half_pi), opaque(1.0f),
+                                    opaque(1.0f), opaque(100.0f)),
+            compile_time_projection, "perspective_fov_lh");
 
-    Compare(mathf::LookAtLH(Vector3{Opaque(0.0f), Opaque(0.0f), Opaque(-5.0f)},
-                            Vector3{Opaque(0.0f), Opaque(0.0f), Opaque(0.0f)},
-                            Vector3{Opaque(0.0f), Opaque(1.0f), Opaque(0.0f)}),
-            kCompileTimeView, "LookAtLH");
+    compare(math::look_at_lh(vector3{opaque(0.0f), opaque(0.0f), opaque(-5.0f)},
+                            vector3{opaque(0.0f), opaque(0.0f), opaque(0.0f)},
+                            vector3{opaque(0.0f), opaque(1.0f), opaque(0.0f)}),
+            compile_time_view, "look_at_lh");
 }
 
 // ---------------------------------------------------------- DirectXMath parity
-#if MATHF_TEST_HAS_DXMATH
+#if MATHEMATICS_TEST_HAS_DXMATH
 namespace {
 
-bool MatchesXm(const Matrix4x4& mine, DirectX::FXMMATRIX theirs, float eps) {
+bool matches_xm(const matrix4x4& mine, DirectX::FXMMATRIX theirs, float eps) {
     DirectX::XMFLOAT4X4 f{};
     DirectX::XMStoreFloat4x4(&f, theirs);
     for (int i = 0; i < 4; ++i) {
@@ -508,45 +508,45 @@ bool MatchesXm(const Matrix4x4& mine, DirectX::FXMMATRIX theirs, float eps) {
 
 } // namespace
 
-TEST(TransformDxParity, ProjectionsMatchDirectXMath) {
-    const float fov = 1.1f, aspect = 1.7778f, nearZ = 0.3f, farZ = 500.0f;
+TEST(transform_dx_parity, projections_match_direct_x_math) {
+    const float fov = 1.1f, aspect = 1.7778f, near_z = 0.3f, far_z = 500.0f;
 
-    EXPECT_TRUE(MatchesXm(mathf::PerspectiveFovLH(fov, aspect, nearZ, farZ),
-                          DirectX::XMMatrixPerspectiveFovLH(fov, aspect, nearZ,
-                                                            farZ), 1e-5f));
-    EXPECT_TRUE(MatchesXm(mathf::PerspectiveFovRH(fov, aspect, nearZ, farZ),
-                          DirectX::XMMatrixPerspectiveFovRH(fov, aspect, nearZ,
-                                                            farZ), 1e-5f));
-    EXPECT_TRUE(MatchesXm(mathf::PerspectiveLH(4, 3, nearZ, farZ),
-                          DirectX::XMMatrixPerspectiveLH(4, 3, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(math::perspective_fov_lh(fov, aspect, near_z, far_z),
+                          DirectX::XMMatrixPerspectiveFovLH(fov, aspect, near_z,
+                                                            far_z), 1e-5f));
+    EXPECT_TRUE(matches_xm(math::perspective_fov_rh(fov, aspect, near_z, far_z),
+                          DirectX::XMMatrixPerspectiveFovRH(fov, aspect, near_z,
+                                                            far_z), 1e-5f));
+    EXPECT_TRUE(matches_xm(math::perspective_lh(4, 3, near_z, far_z),
+                          DirectX::XMMatrixPerspectiveLH(4, 3, near_z, far_z),
                           1e-5f));
-    EXPECT_TRUE(MatchesXm(mathf::PerspectiveRH(4, 3, nearZ, farZ),
-                          DirectX::XMMatrixPerspectiveRH(4, 3, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(math::perspective_rh(4, 3, near_z, far_z),
+                          DirectX::XMMatrixPerspectiveRH(4, 3, near_z, far_z),
                           1e-5f));
-    EXPECT_TRUE(MatchesXm(mathf::OrthographicLH(8, 6, nearZ, farZ),
-                          DirectX::XMMatrixOrthographicLH(8, 6, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(math::orthographic_lh(8, 6, near_z, far_z),
+                          DirectX::XMMatrixOrthographicLH(8, 6, near_z, far_z),
                           1e-5f));
-    EXPECT_TRUE(MatchesXm(mathf::OrthographicRH(8, 6, nearZ, farZ),
-                          DirectX::XMMatrixOrthographicRH(8, 6, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(math::orthographic_rh(8, 6, near_z, far_z),
+                          DirectX::XMMatrixOrthographicRH(8, 6, near_z, far_z),
                           1e-5f));
-    EXPECT_TRUE(MatchesXm(
-        mathf::OrthographicOffCenterLH(-1, 7, 2, 8, nearZ, farZ),
-        DirectX::XMMatrixOrthographicOffCenterLH(-1, 7, 2, 8, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(
+        math::orthographic_off_center_lh(-1, 7, 2, 8, near_z, far_z),
+        DirectX::XMMatrixOrthographicOffCenterLH(-1, 7, 2, 8, near_z, far_z),
         1e-5f));
-    EXPECT_TRUE(MatchesXm(
-        mathf::OrthographicOffCenterRH(-1, 7, 2, 8, nearZ, farZ),
-        DirectX::XMMatrixOrthographicOffCenterRH(-1, 7, 2, 8, nearZ, farZ),
+    EXPECT_TRUE(matches_xm(
+        math::orthographic_off_center_rh(-1, 7, 2, 8, near_z, far_z),
+        DirectX::XMMatrixOrthographicOffCenterRH(-1, 7, 2, 8, near_z, far_z),
         1e-5f));
 }
 
-TEST(TransformDxParity, ViewAndBasicTransformsMatchDirectXMath) {
-    RandomVectors gen(kSeed + 320);
+TEST(transform_dx_parity, view_and_basic_transforms_match_direct_x_math) {
+    random_vectors gen(random_seed + 320);
     for (int n = 0; n < 32; ++n) {
-        const Sample s = gen.Next();
-        const Vector3 eye{s.f[0], s.f[1], s.f[2]};
-        const Sample s2 = gen.Next();
-        const Vector3 target{s2.f[0], s2.f[1], s2.f[2]};
-        if (mathf::LengthSq(target - eye) < 1.0f) continue;
+        const sample s = gen.next();
+        const vector3 eye{s.f[0], s.f[1], s.f[2]};
+        const sample s2 = gen.next();
+        const vector3 target{s2.f[0], s2.f[1], s2.f[2]};
+        if (math::length_sq(target - eye) < 1.0f) continue;
 
         const DirectX::XMVECTOR e =
             DirectX::XMVectorSet(eye.x, eye.y, eye.z, 1.0f);
@@ -554,36 +554,36 @@ TEST(TransformDxParity, ViewAndBasicTransformsMatchDirectXMath) {
             DirectX::XMVectorSet(target.x, target.y, target.z, 1.0f);
         const DirectX::XMVECTOR u = DirectX::XMVectorSet(0, 1, 0, 0);
 
-        EXPECT_TRUE(MatchesXm(mathf::LookAtLH(eye, target, Vector3{0, 1, 0}),
+        EXPECT_TRUE(matches_xm(math::look_at_lh(eye, target, vector3{0, 1, 0}),
                               DirectX::XMMatrixLookAtLH(e, t, u), 1e-4f)) << n;
-        EXPECT_TRUE(MatchesXm(mathf::LookAtRH(eye, target, Vector3{0, 1, 0}),
+        EXPECT_TRUE(matches_xm(math::look_at_rh(eye, target, vector3{0, 1, 0}),
                               DirectX::XMMatrixLookAtRH(e, t, u), 1e-4f)) << n;
 
         const float a = s.f[3] * 0.03f;
-        EXPECT_TRUE(MatchesXm(mathf::RotationX(a), DirectX::XMMatrixRotationX(a),
+        EXPECT_TRUE(matches_xm(math::rotation_x(a), DirectX::XMMatrixRotationX(a),
                               1e-5f)) << n;
-        EXPECT_TRUE(MatchesXm(mathf::RotationY(a), DirectX::XMMatrixRotationY(a),
+        EXPECT_TRUE(matches_xm(math::rotation_y(a), DirectX::XMMatrixRotationY(a),
                               1e-5f)) << n;
-        EXPECT_TRUE(MatchesXm(mathf::RotationZ(a), DirectX::XMMatrixRotationZ(a),
+        EXPECT_TRUE(matches_xm(math::rotation_z(a), DirectX::XMMatrixRotationZ(a),
                               1e-5f)) << n;
     }
 }
 
 // XMMatrixAffineTransformation is DirectXMath's TRS, and it has to agree about
 // the order the three parts apply in.
-TEST(TransformDxParity, ComposeMatchesAffineTransformation) {
-    RandomVectors gen(kSeed + 321);
+TEST(transform_dx_parity, compose_matches_affine_transformation) {
+    random_vectors gen(random_seed + 321);
     for (int n = 0; n < 32; ++n) {
-        const Sample s = gen.Next();
-        const Vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
+        const sample s = gen.next();
+        const vector3 scale{std::abs(s.f[0]) * 0.05f + 0.5f,
                             std::abs(s.f[1]) * 0.05f + 0.5f,
                             std::abs(s.f[2]) * 0.05f + 0.5f};
-        const Vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
-        const Quaternion rot = mathf::QuaternionFromPitchYawRoll(
+        const vector3 translation{s.f[3], s.f[0] * 0.1f, s.f[1] * 0.1f};
+        const quaternion rot = math::quaternion_from_pitch_yaw_roll(
             s.f[0] * 0.02f, s.f[1] * 0.02f, s.f[2] * 0.02f);
 
-        EXPECT_TRUE(MatchesXm(
-            mathf::Compose(scale, rot, translation),
+        EXPECT_TRUE(matches_xm(
+            math::compose(scale, rot, translation),
             DirectX::XMMatrixAffineTransformation(
                 DirectX::XMVectorSet(scale.x, scale.y, scale.z, 0.0f),
                 DirectX::XMVectorZero(),
@@ -593,4 +593,4 @@ TEST(TransformDxParity, ComposeMatchesAffineTransformation) {
             1e-4f)) << n;
     }
 }
-#endif // MATHF_TEST_HAS_DXMATH
+#endif // MATHEMATICS_TEST_HAS_DXMATH

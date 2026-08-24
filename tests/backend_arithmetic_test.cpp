@@ -3,295 +3,295 @@
 
 #include "support/reg_testing.hpp"
 
-#include <mathf/arch/consteval_ops.hpp>
+#include <mathematics/arch/consteval_ops.hpp>
 
 #if __has_include(<DirectXMath.h>)
 #  include <DirectXMath.h>
-#  define MATHF_TEST_HAS_DXMATH 1
+#  define MATHEMATICS_TEST_HAS_DXMATH 1
 #else
-#  define MATHF_TEST_HAS_DXMATH 0
+#  define MATHEMATICS_TEST_HAS_DXMATH 0
 #endif
 
 namespace {
 
-using namespace mathf_test;
-namespace ref = mathf::consteval_ops;
+using namespace math_test;
+namespace ref = math::consteval_ops;
 
 } // namespace
 
 // ------------------------------------------------------------ constexpr parity
 // Evaluated at compile time. A regression in the dual-path design breaks the
 // build here rather than producing wrong numbers at run time.
-static_assert(mathf::GetX(mathf::Add(mathf::Set(1, 2, 3, 4),
-                                     mathf::Set(10, 20, 30, 40))) == 11.0f);
-static_assert(mathf::GetY(mathf::Sub(mathf::Set(10, 20, 30, 40),
-                                     mathf::Set(1, 2, 3, 4))) == 18.0f);
-static_assert(mathf::GetZ(mathf::Mul(mathf::Set(2, 3, 4, 5),
-                                     mathf::Splat(3))) == 12.0f);
-static_assert(mathf::GetW(mathf::Div(mathf::Set(10, 20, 30, 40),
-                                     mathf::Splat(2))) == 20.0f);
-static_assert(mathf::GetX(mathf::Negate(mathf::Splat(3.5f))) == -3.5f);
-static_assert(mathf::GetX(mathf::Abs(mathf::Splat(-3.5f))) == 3.5f);
-static_assert(mathf::GetX(mathf::MulAdd(mathf::Splat(2), mathf::Splat(3),
-                                        mathf::Splat(1))) == 7.0f);
-static_assert(mathf::GetX(mathf::MulSub(mathf::Splat(2), mathf::Splat(3),
-                                        mathf::Splat(1))) == 5.0f);
-static_assert(mathf::GetX(mathf::NegMulAdd(mathf::Splat(2), mathf::Splat(3),
-                                           mathf::Splat(10))) == 4.0f);
-static_assert(mathf::GetX(mathf::Min(mathf::Splat(2), mathf::Splat(5))) == 2.0f);
-static_assert(mathf::GetX(mathf::Max(mathf::Splat(2), mathf::Splat(5))) == 5.0f);
-static_assert(mathf::GetX(mathf::Sqrt(mathf::Splat(16.0f))) == 4.0f);
-static_assert(mathf::GetX(mathf::Sqrt(mathf::Splat(0.0f))) == 0.0f);
-static_assert(mathf::GetX(mathf::Recip(mathf::Splat(4.0f))) == 0.25f);
-static_assert(mathf::GetX(mathf::RSqrt(mathf::Splat(16.0f))) == 0.25f);
+static_assert(math::get_x(math::add(math::set(1, 2, 3, 4),
+                                     math::set(10, 20, 30, 40))) == 11.0f);
+static_assert(math::get_y(math::sub(math::set(10, 20, 30, 40),
+                                     math::set(1, 2, 3, 4))) == 18.0f);
+static_assert(math::get_z(math::mul(math::set(2, 3, 4, 5),
+                                     math::splat(3))) == 12.0f);
+static_assert(math::get_w(math::div(math::set(10, 20, 30, 40),
+                                     math::splat(2))) == 20.0f);
+static_assert(math::get_x(math::negate(math::splat(3.5f))) == -3.5f);
+static_assert(math::get_x(math::abs(math::splat(-3.5f))) == 3.5f);
+static_assert(math::get_x(math::mul_add(math::splat(2), math::splat(3),
+                                        math::splat(1))) == 7.0f);
+static_assert(math::get_x(math::mul_sub(math::splat(2), math::splat(3),
+                                        math::splat(1))) == 5.0f);
+static_assert(math::get_x(math::neg_mul_add(math::splat(2), math::splat(3),
+                                           math::splat(10))) == 4.0f);
+static_assert(math::get_x(math::min(math::splat(2), math::splat(5))) == 2.0f);
+static_assert(math::get_x(math::max(math::splat(2), math::splat(5))) == 5.0f);
+static_assert(math::get_x(math::sqrt(math::splat(16.0f))) == 4.0f);
+static_assert(math::get_x(math::sqrt(math::splat(0.0f))) == 0.0f);
+static_assert(math::get_x(math::recip(math::splat(4.0f))) == 0.25f);
+static_assert(math::get_x(math::rsqrt(math::splat(16.0f))) == 0.25f);
 
 // Negation flips the sign bit rather than subtracting, so -0.0f becomes +0.0f.
-static_assert(mathf::LaneBits(mathf::Negate(mathf::Splat(-0.0f)), 0) == 0u);
-static_assert(mathf::LaneBits(mathf::Abs(mathf::Splat(-0.0f)), 0) == 0u);
+static_assert(math::lane_bits(math::negate(math::splat(-0.0f)), 0) == 0u);
+static_assert(math::lane_bits(math::abs(math::splat(-0.0f)), 0) == 0u);
 
 // The constexpr square root is Newton-Raphson, so exactness on non-perfect
 // squares is worth pinning down rather than assuming.
-static_assert(mathf::GetX(mathf::Sqrt(mathf::Splat(2.0f))) > 1.41421f &&
-              mathf::GetX(mathf::Sqrt(mathf::Splat(2.0f))) < 1.41422f);
-static_assert(mathf::GetX(mathf::Sqrt(mathf::Splat(1e30f))) > 9.9999e14f &&
-              mathf::GetX(mathf::Sqrt(mathf::Splat(1e30f))) < 1.0001e15f);
+static_assert(math::get_x(math::sqrt(math::splat(2.0f))) > 1.41421f &&
+              math::get_x(math::sqrt(math::splat(2.0f))) < 1.41422f);
+static_assert(math::get_x(math::sqrt(math::splat(1e30f))) > 9.9999e14f &&
+              math::get_x(math::sqrt(math::splat(1e30f))) < 1.0001e15f);
 
-TEST(BackendArithmeticConstexpr, CompileTimeMatchesRuntime) {
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::Add(mathf::Set(1, 2, 3, 4),
-                                           mathf::Set(10, 20, 30, 40))), 11.0f);
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::MulSub(mathf::Splat(2), mathf::Splat(3),
-                                              mathf::Splat(1))), 5.0f);
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::NegMulAdd(mathf::Splat(2), mathf::Splat(3),
-                                                 mathf::Splat(10))), 4.0f);
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::Sqrt(mathf::Splat(16.0f))), 4.0f);
-    EXPECT_EQ(mathf::LaneBits(mathf::Negate(mathf::Splat(-0.0f)), 0), 0u);
+TEST(backend_arithmetic_constexpr, compile_time_matches_runtime) {
+    EXPECT_FLOAT_EQ(math::get_x(math::add(math::set(1, 2, 3, 4),
+                                           math::set(10, 20, 30, 40))), 11.0f);
+    EXPECT_FLOAT_EQ(math::get_x(math::mul_sub(math::splat(2), math::splat(3),
+                                              math::splat(1))), 5.0f);
+    EXPECT_FLOAT_EQ(math::get_x(math::neg_mul_add(math::splat(2), math::splat(3),
+                                                 math::splat(10))), 4.0f);
+    EXPECT_FLOAT_EQ(math::get_x(math::sqrt(math::splat(16.0f))), 4.0f);
+    EXPECT_EQ(math::lane_bits(math::negate(math::splat(-0.0f)), 0), 0u);
 }
 
 // ------------------------------------------------------------ reference parity
-TEST(BackendArithmetic, MatchesReferenceOnRandomInput) {
-    RandomVectors gen(kSeed);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.Next();
-        const Sample b = gen.Next();
+TEST(backend_arithmetic, matches_reference_on_random_input) {
+    random_vectors gen(random_seed);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next();
+        const sample b = gen.next();
 
         // Single IEEE operations on identical inputs: exact bits are the bar.
-        EXPECT_TRUE(BitsEqual(mathf::Add(a.v, b.v), ref::Add(a.v, b.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Sub(a.v, b.v), ref::Sub(a.v, b.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Mul(a.v, b.v), ref::Mul(a.v, b.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Div(a.v, b.v), ref::Div(a.v, b.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Negate(a.v), ref::Negate(a.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Abs(a.v), ref::Abs(a.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Min(a.v, b.v), ref::Min(a.v, b.v))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Max(a.v, b.v), ref::Max(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::add(a.v, b.v), ref::add(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::sub(a.v, b.v), ref::sub(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::mul(a.v, b.v), ref::mul(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::div(a.v, b.v), ref::div(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::negate(a.v), ref::negate(a.v))) << n;
+        EXPECT_TRUE(bits_equal(math::abs(a.v), ref::abs(a.v))) << n;
+        EXPECT_TRUE(bits_equal(math::min(a.v, b.v), ref::min(a.v, b.v))) << n;
+        EXPECT_TRUE(bits_equal(math::max(a.v, b.v), ref::max(a.v, b.v))) << n;
     }
 }
 
-TEST(BackendArithmetic, FusedFormsMatchReferenceWithinTolerance) {
-    RandomVectors gen(kSeed + 1);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.Next(), b = gen.Next(), c = gen.Next();
+TEST(backend_arithmetic, fused_forms_match_reference_within_tolerance) {
+    random_vectors gen(random_seed + 1);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next(), b = gen.next(), c = gen.next();
         // A hardware FMA keeps the product at full width, so it can differ from
         // the reference's rounded multiply-then-add in the last places.
-        EXPECT_TRUE(NearEqual(mathf::MulAdd(a.v, b.v, c.v),
-                              ref::MulAdd(a.v, b.v, c.v))) << n;
-        EXPECT_TRUE(NearEqual(mathf::MulSub(a.v, b.v, c.v),
-                              ref::MulSub(a.v, b.v, c.v))) << n;
-        EXPECT_TRUE(NearEqual(mathf::NegMulAdd(a.v, b.v, c.v),
-                              ref::NegMulAdd(a.v, b.v, c.v))) << n;
+        EXPECT_TRUE(near_equal(math::mul_add(a.v, b.v, c.v),
+                              ref::mul_add(a.v, b.v, c.v))) << n;
+        EXPECT_TRUE(near_equal(math::mul_sub(a.v, b.v, c.v),
+                              ref::mul_sub(a.v, b.v, c.v))) << n;
+        EXPECT_TRUE(near_equal(math::neg_mul_add(a.v, b.v, c.v),
+                              ref::neg_mul_add(a.v, b.v, c.v))) << n;
     }
 }
 
-TEST(BackendArithmetic, RootsMatchReference) {
-    RandomVectors gen(kSeed + 2);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.NextPositive();
-        EXPECT_TRUE(NearEqual(mathf::Sqrt(a.v), ref::Sqrt(a.v))) << n;
-        EXPECT_TRUE(NearEqual(mathf::RSqrt(a.v), ref::RSqrt(a.v))) << n;
-        EXPECT_TRUE(NearEqual(mathf::Recip(a.v), ref::Recip(a.v))) << n;
+TEST(backend_arithmetic, roots_match_reference) {
+    random_vectors gen(random_seed + 2);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next_positive();
+        EXPECT_TRUE(near_equal(math::sqrt(a.v), ref::sqrt(a.v))) << n;
+        EXPECT_TRUE(near_equal(math::rsqrt(a.v), ref::rsqrt(a.v))) << n;
+        EXPECT_TRUE(near_equal(math::recip(a.v), ref::recip(a.v))) << n;
     }
 }
 
 // The Est forms trade precision for speed, so they get their own much looser
 // bound. SSE rsqrtps and rcpps are specified to roughly 12 bits.
-TEST(BackendArithmetic, EstimateFormsAreWithinTwelveBits) {
-    constexpr float kEstTolerance = 4e-3f;
-    RandomVectors gen(kSeed + 3);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.NextPositive();
-        EXPECT_TRUE(NearEqual(mathf::RSqrtEst(a.v), ref::RSqrt(a.v),
-                              kEstTolerance, kEstTolerance)) << n;
-        EXPECT_TRUE(NearEqual(mathf::RecipEst(a.v), ref::Recip(a.v),
-                              kEstTolerance, kEstTolerance)) << n;
+TEST(backend_arithmetic, estimate_forms_are_within_twelve_bits) {
+    constexpr float estimate_tolerance = 4e-3f;
+    random_vectors gen(random_seed + 3);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next_positive();
+        EXPECT_TRUE(near_equal(math::rsqrt_est(a.v), ref::rsqrt(a.v),
+                              estimate_tolerance, estimate_tolerance)) << n;
+        EXPECT_TRUE(near_equal(math::recip_est(a.v), ref::recip(a.v),
+                              estimate_tolerance, estimate_tolerance)) << n;
     }
 }
 
-TEST(BackendArithmetic, MatchesReferenceOnEdgeValues) {
-    const auto& values = EdgeValues();
+TEST(backend_arithmetic, matches_reference_on_edge_values) {
+    const auto& values = edge_values();
     for (std::size_t i = 0; i < values.size(); ++i) {
         for (std::size_t j = 0; j < values.size(); ++j) {
-            const VecReg a = mathf::Splat(Opaque(values[i]));
-            const VecReg b = mathf::Splat(Opaque(values[j]));
+            const vec_reg a = math::splat(opaque(values[i]));
+            const vec_reg b = math::splat(opaque(values[j]));
             const std::string where =
                 "values[" + std::to_string(i) + "], values[" + std::to_string(j) + "]";
 
-            EXPECT_TRUE(BitsEqual(mathf::Add(a, b), ref::Add(a, b))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Sub(a, b), ref::Sub(a, b))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Mul(a, b), ref::Mul(a, b))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Div(a, b), ref::Div(a, b))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Negate(a), ref::Negate(a))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Abs(a), ref::Abs(a))) << where;
-            EXPECT_TRUE(BitsEqual(mathf::Recip(a), ref::Recip(a))) << where;
+            EXPECT_TRUE(bits_equal(math::add(a, b), ref::add(a, b))) << where;
+            EXPECT_TRUE(bits_equal(math::sub(a, b), ref::sub(a, b))) << where;
+            EXPECT_TRUE(bits_equal(math::mul(a, b), ref::mul(a, b))) << where;
+            EXPECT_TRUE(bits_equal(math::div(a, b), ref::div(a, b))) << where;
+            EXPECT_TRUE(bits_equal(math::negate(a), ref::negate(a))) << where;
+            EXPECT_TRUE(bits_equal(math::abs(a), ref::abs(a))) << where;
+            EXPECT_TRUE(bits_equal(math::recip(a), ref::recip(a))) << where;
 
-            // Sqrt is the one operation whose reference is not bit-exact: the
+            // sqrt is the one operation whose reference is not bit-exact: the
             // hardware instruction is correctly rounded, while consteval_ops
             // iterates Newton-Raphson in double and rounds once more at the end,
             // which can land a ULP away.
-            EXPECT_TRUE(NearEqual(mathf::Sqrt(a), ref::Sqrt(a))) << where;
+            EXPECT_TRUE(near_equal(math::sqrt(a), ref::sqrt(a))) << where;
 
-            // Min/Max diverge by target on NaN and on signed-zero ties, so they
+            // min/max diverge by target on NaN and on signed-zero ties, so they
             // are pinned separately below rather than compared here. Every other
             // edge combination must agree exactly.
         }
     }
 }
 
-// Min/Max are target-specific in two places and intentionally not normalised
+// min/max are target-specific in two places and intentionally not normalised
 // (see arch/simd_neon.hpp). These tests pin what the current target actually
 // does, so a change shows up as a visible test update rather than a silent shift.
-TEST(BackendArithmetic, MinMaxNaNBehaviourIsDocumented) {
-    const VecReg nan = mathf::Splat(Opaque(QuietNaN()));
-    const VecReg one = mathf::Splat(Opaque(1.0f));
+TEST(backend_arithmetic, min_max_na_n_behaviour_is_documented) {
+    const vec_reg nan = math::splat(opaque(quiet_nan()));
+    const vec_reg one = math::splat(opaque(1.0f));
 
-#if MATHF_SIMD_SSE || MATHF_SIMD_SCALAR
+#if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_SCALAR
     // minps and the scalar reference both return the second operand when the
     // comparison is unordered.
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::Min(nan, one)), 1.0f);
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Min(one, nan))));
-    EXPECT_FLOAT_EQ(mathf::GetX(mathf::Max(nan, one)), 1.0f);
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Max(one, nan))));
-#elif MATHF_SIMD_NEON
+    EXPECT_FLOAT_EQ(math::get_x(math::min(nan, one)), 1.0f);
+    EXPECT_TRUE(std::isnan(math::get_x(math::min(one, nan))));
+    EXPECT_FLOAT_EQ(math::get_x(math::max(nan, one)), 1.0f);
+    EXPECT_TRUE(std::isnan(math::get_x(math::max(one, nan))));
+#elif MATHEMATICS_SIMD_NEON
     // ARM FMIN/FMAX return a quiet NaN if either operand is NaN.
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Min(nan, one))));
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Min(one, nan))));
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Max(nan, one))));
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Max(one, nan))));
+    EXPECT_TRUE(std::isnan(math::get_x(math::min(nan, one))));
+    EXPECT_TRUE(std::isnan(math::get_x(math::min(one, nan))));
+    EXPECT_TRUE(std::isnan(math::get_x(math::max(nan, one))));
+    EXPECT_TRUE(std::isnan(math::get_x(math::max(one, nan))));
 #endif
 }
 
 // The second divergence. -0.0 and +0.0 compare equal, so a value comparison
 // cannot see this at all -- it has to be checked on the bits.
-TEST(BackendArithmetic, MinMaxSignedZeroBehaviourIsDocumented) {
-    const VecReg pos = mathf::Splat(Opaque(0.0f));
-    const VecReg neg = mathf::Splat(Opaque(-0.0f));
-    constexpr std::uint32_t kPosZero = 0x00000000u;
-    constexpr std::uint32_t kNegZero = 0x80000000u;
+TEST(backend_arithmetic, min_max_signed_zero_behaviour_is_documented) {
+    const vec_reg pos = math::splat(opaque(0.0f));
+    const vec_reg neg = math::splat(opaque(-0.0f));
+    constexpr std::uint32_t positive_zero = 0x00000000u;
+    constexpr std::uint32_t negative_zero = 0x80000000u;
 
-#if MATHF_SIMD_SSE || MATHF_SIMD_SCALAR
+#if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_SCALAR
     // minps compares them equal and falls through to the second operand, so the
     // result is whichever zero was passed second.
-    EXPECT_EQ(mathf::LaneBits(mathf::Min(neg, pos), 0), kPosZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Min(pos, neg), 0), kNegZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Max(neg, pos), 0), kPosZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Max(pos, neg), 0), kNegZero);
-#elif MATHF_SIMD_NEON
+    EXPECT_EQ(math::lane_bits(math::min(neg, pos), 0), positive_zero);
+    EXPECT_EQ(math::lane_bits(math::min(pos, neg), 0), negative_zero);
+    EXPECT_EQ(math::lane_bits(math::max(neg, pos), 0), positive_zero);
+    EXPECT_EQ(math::lane_bits(math::max(pos, neg), 0), negative_zero);
+#elif MATHEMATICS_SIMD_NEON
     // ARM FMIN/FMAX order the zeros, independent of which came first.
-    EXPECT_EQ(mathf::LaneBits(mathf::Min(neg, pos), 0), kNegZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Min(pos, neg), 0), kNegZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Max(neg, pos), 0), kPosZero);
-    EXPECT_EQ(mathf::LaneBits(mathf::Max(pos, neg), 0), kPosZero);
+    EXPECT_EQ(math::lane_bits(math::min(neg, pos), 0), negative_zero);
+    EXPECT_EQ(math::lane_bits(math::min(pos, neg), 0), negative_zero);
+    EXPECT_EQ(math::lane_bits(math::max(neg, pos), 0), positive_zero);
+    EXPECT_EQ(math::lane_bits(math::max(pos, neg), 0), positive_zero);
 #endif
 }
 
-// MulSub is where a fused implementation can lose the sign of zero: computing
+// mul_sub is where a fused implementation can lose the sign of zero: computing
 // -(c - a*b) instead of a*b - c flips it when the two cancel exactly.
-TEST(BackendArithmetic, FusedFormsKeepZeroSignOnExactCancellation) {
-    const VecReg two = mathf::Splat(Opaque(2.0f));
-    const VecReg three = mathf::Splat(Opaque(3.0f));
-    const VecReg six = mathf::Splat(Opaque(6.0f));
+TEST(backend_arithmetic, fused_forms_keep_zero_sign_on_exact_cancellation) {
+    const vec_reg two = math::splat(opaque(2.0f));
+    const vec_reg three = math::splat(opaque(3.0f));
+    const vec_reg six = math::splat(opaque(6.0f));
 
-    EXPECT_EQ(mathf::LaneBits(mathf::MulSub(two, three, six), 0), 0x00000000u)
+    EXPECT_EQ(math::lane_bits(math::mul_sub(two, three, six), 0), 0x00000000u)
         << "2*3 - 6 must be +0.0";
-    EXPECT_EQ(mathf::LaneBits(mathf::NegMulAdd(two, three, six), 0), 0x00000000u)
+    EXPECT_EQ(math::lane_bits(math::neg_mul_add(two, three, six), 0), 0x00000000u)
         << "6 - 2*3 must be +0.0";
-    EXPECT_TRUE(BitsEqual(mathf::MulSub(two, three, six),
-                          ref::MulSub(two, three, six)));
-    EXPECT_TRUE(BitsEqual(mathf::NegMulAdd(two, three, six),
-                          ref::NegMulAdd(two, three, six)));
+    EXPECT_TRUE(bits_equal(math::mul_sub(two, three, six),
+                          ref::mul_sub(two, three, six)));
+    EXPECT_TRUE(bits_equal(math::neg_mul_add(two, three, six),
+                          ref::neg_mul_add(two, three, six)));
 }
 
-TEST(BackendArithmetic, SqrtOfNegativeIsNaN) {
-    EXPECT_TRUE(std::isnan(mathf::GetX(mathf::Sqrt(mathf::Splat(Opaque(-1.0f))))));
+TEST(backend_arithmetic, sqrt_of_negative_is_na_n) {
+    EXPECT_TRUE(std::isnan(math::get_x(math::sqrt(math::splat(opaque(-1.0f))))));
     // Negative zero is not a domain error; the sign is preserved.
-    EXPECT_EQ(mathf::LaneBits(mathf::Sqrt(mathf::Splat(Opaque(-0.0f))), 0),
-              mathf::BitsOf(-0.0f));
+    EXPECT_EQ(math::lane_bits(math::sqrt(math::splat(opaque(-0.0f))), 0),
+              math::bits_of(-0.0f));
 }
 
 // ---------------------------------------------------------- DirectXMath parity
-#if MATHF_TEST_HAS_DXMATH
+#if MATHEMATICS_TEST_HAS_DXMATH
 namespace {
 
-DirectX::XMVECTOR ToXm(VecReg v) {
-    return DirectX::XMVectorSet(mathf::Lane(v, 0), mathf::Lane(v, 1),
-                                mathf::Lane(v, 2), mathf::Lane(v, 3));
+DirectX::XMVECTOR to_xm(vec_reg v) {
+    return DirectX::XMVectorSet(math::lane(v, 0), math::lane(v, 1),
+                                math::lane(v, 2), math::lane(v, 3));
 }
 
-VecReg FromXm(DirectX::FXMVECTOR v) {
+vec_reg from_xm(DirectX::FXMVECTOR v) {
     DirectX::XMFLOAT4 out{};
     DirectX::XMStoreFloat4(&out, v);
-    return mathf::Set(out.x, out.y, out.z, out.w);
+    return math::set(out.x, out.y, out.z, out.w);
 }
 
 } // namespace
 
-TEST(BackendArithmeticDxParity, MatchesDirectXMath) {
-    RandomVectors gen(kSeed + 10);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.Next();
-        const Sample b = gen.Next();
-        const DirectX::XMVECTOR xa = ToXm(a.v);
-        const DirectX::XMVECTOR xb = ToXm(b.v);
+TEST(backend_arithmetic_dx_parity, matches_direct_x_math) {
+    random_vectors gen(random_seed + 10);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next();
+        const sample b = gen.next();
+        const DirectX::XMVECTOR xa = to_xm(a.v);
+        const DirectX::XMVECTOR xb = to_xm(b.v);
 
-        EXPECT_TRUE(BitsEqual(mathf::Add(a.v, b.v),
-                              FromXm(DirectX::XMVectorAdd(xa, xb)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Sub(a.v, b.v),
-                              FromXm(DirectX::XMVectorSubtract(xa, xb)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Mul(a.v, b.v),
-                              FromXm(DirectX::XMVectorMultiply(xa, xb)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Div(a.v, b.v),
-                              FromXm(DirectX::XMVectorDivide(xa, xb)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Negate(a.v),
-                              FromXm(DirectX::XMVectorNegate(xa)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Abs(a.v),
-                              FromXm(DirectX::XMVectorAbs(xa)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Min(a.v, b.v),
-                              FromXm(DirectX::XMVectorMin(xa, xb)))) << n;
-        EXPECT_TRUE(BitsEqual(mathf::Max(a.v, b.v),
-                              FromXm(DirectX::XMVectorMax(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::add(a.v, b.v),
+                              from_xm(DirectX::XMVectorAdd(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::sub(a.v, b.v),
+                              from_xm(DirectX::XMVectorSubtract(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::mul(a.v, b.v),
+                              from_xm(DirectX::XMVectorMultiply(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::div(a.v, b.v),
+                              from_xm(DirectX::XMVectorDivide(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::negate(a.v),
+                              from_xm(DirectX::XMVectorNegate(xa)))) << n;
+        EXPECT_TRUE(bits_equal(math::abs(a.v),
+                              from_xm(DirectX::XMVectorAbs(xa)))) << n;
+        EXPECT_TRUE(bits_equal(math::min(a.v, b.v),
+                              from_xm(DirectX::XMVectorMin(xa, xb)))) << n;
+        EXPECT_TRUE(bits_equal(math::max(a.v, b.v),
+                              from_xm(DirectX::XMVectorMax(xa, xb)))) << n;
     }
 }
 
-TEST(BackendArithmeticDxParity, FusedAndRootsMatchDirectXMath) {
-    RandomVectors gen(kSeed + 11);
-    for (int n = 0; n < kSamples; ++n) {
-        const Sample a = gen.NextPositive();
-        const Sample b = gen.Next();
-        const Sample c = gen.Next();
+TEST(backend_arithmetic_dx_parity, fused_and_roots_match_direct_x_math) {
+    random_vectors gen(random_seed + 11);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next_positive();
+        const sample b = gen.next();
+        const sample c = gen.next();
 
-        EXPECT_TRUE(NearEqual(mathf::MulAdd(a.v, b.v, c.v),
-                              FromXm(DirectX::XMVectorMultiplyAdd(
-                                  ToXm(a.v), ToXm(b.v), ToXm(c.v))))) << n;
+        EXPECT_TRUE(near_equal(math::mul_add(a.v, b.v, c.v),
+                              from_xm(DirectX::XMVectorMultiplyAdd(
+                                  to_xm(a.v), to_xm(b.v), to_xm(c.v))))) << n;
         // XMVectorNegativeMultiplySubtract computes c - a*b, the same as ours.
-        EXPECT_TRUE(NearEqual(mathf::NegMulAdd(a.v, b.v, c.v),
-                              FromXm(DirectX::XMVectorNegativeMultiplySubtract(
-                                  ToXm(a.v), ToXm(b.v), ToXm(c.v))))) << n;
-        EXPECT_TRUE(NearEqual(mathf::Sqrt(a.v),
-                              FromXm(DirectX::XMVectorSqrt(ToXm(a.v))))) << n;
-        EXPECT_TRUE(NearEqual(mathf::RSqrt(a.v),
-                              FromXm(DirectX::XMVectorReciprocalSqrt(
-                                  ToXm(a.v))))) << n;
-        EXPECT_TRUE(NearEqual(mathf::Recip(a.v),
-                              FromXm(DirectX::XMVectorReciprocal(
-                                  ToXm(a.v))))) << n;
+        EXPECT_TRUE(near_equal(math::neg_mul_add(a.v, b.v, c.v),
+                              from_xm(DirectX::XMVectorNegativeMultiplySubtract(
+                                  to_xm(a.v), to_xm(b.v), to_xm(c.v))))) << n;
+        EXPECT_TRUE(near_equal(math::sqrt(a.v),
+                              from_xm(DirectX::XMVectorSqrt(to_xm(a.v))))) << n;
+        EXPECT_TRUE(near_equal(math::rsqrt(a.v),
+                              from_xm(DirectX::XMVectorReciprocalSqrt(
+                                  to_xm(a.v))))) << n;
+        EXPECT_TRUE(near_equal(math::recip(a.v),
+                              from_xm(DirectX::XMVectorReciprocal(
+                                  to_xm(a.v))))) << n;
     }
 }
-#endif // MATHF_TEST_HAS_DXMATH
+#endif // MATHEMATICS_TEST_HAS_DXMATH

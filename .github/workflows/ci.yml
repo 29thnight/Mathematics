@@ -47,12 +47,39 @@ jobs:
 
       - name: Report detected configuration
         run: |
-          $bin = "$env:LOCALAPPDATA\MathfBuild\${{ matrix.preset }}\tools\mathf_config_report.exe"
+          $bin = "$env:LOCALAPPDATA\MathematicsBuild\${{ matrix.preset }}\tools\mathematics_config_report.exe"
           & $bin
         shell: pwsh
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+      - name: Repaired regression performance gate
+        if: matrix.preset == 'msvc-release' || matrix.preset == 'clang-release'
+        shell: pwsh
+        run: |
+          $gate = @{
+            BenchmarkExe = "$env:LOCALAPPDATA\MathematicsBuild\${{ matrix.preset }}\bench\mathematics_bench.exe"
+            OutputPath = "$env:RUNNER_TEMP\mathematics-performance-${{ matrix.preset }}.json"
+            MaxRegressionPercent = 5
+          }
+          foreach ($attempt in 1..2) {
+            try {
+              ./scripts/check_performance.ps1 @gate
+              break
+            } catch {
+              if ($attempt -eq 2) { throw }
+              Write-Warning "Noisy or failing performance sample; retrying once. $($_.Exception.Message)"
+            }
+          }
+
+      - name: Upload performance report
+        if: always() && (matrix.preset == 'msvc-release' || matrix.preset == 'clang-release')
+        uses: actions/upload-artifact@v4
+        with:
+          name: mathematics-performance-${{ matrix.preset }}
+          path: ${{ runner.temp }}\mathematics-performance-${{ matrix.preset }}.json
+          if-no-files-found: warn
 
   # Portability guard. No DirectXMath here, so these jobs prove the library
   # builds and self-checks cleanly outside the Windows toolchain.
@@ -80,10 +107,59 @@ jobs:
         run: cmake --build build
 
       - name: Report detected configuration
-        run: ./build/tools/mathf_config_report
+        run: ./build/tools/mathematics_config_report
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    name: Line coverage >= 80%
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install gcovr
+        run: python -m pip install gcovr==8.3
+
+      - name: Configure coverage
+        env:
+          CC: gcc
+          CXX: g++
+        run: >-
+          cmake -S . -B build-coverage
+          -DCMAKE_BUILD_TYPE=Debug
+          -DMATHEMATICS_ENABLE_COVERAGE=ON
+          -DMATHEMATICS_BUILD_BENCH=OFF
+          -DMATHEMATICS_BUILD_TOOLS=OFF
+
+      - name: Build coverage target
+        run: cmake --build build-coverage --target mathematics_tests
+
+      - name: Run coverage tests
+        run: ctest --test-dir build-coverage --output-on-failure
+
+      - name: Enforce line coverage
+        run: >-
+          gcovr
+          --root .
+          --filter 'include/mathematics/'
+          --fail-under-line 80
+          --print-summary
+          --xml-pretty
+          --output "$RUNNER_TEMP/mathematics-coverage.xml"
+          build-coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mathematics-coverage-gcc
+          path: ${{ runner.temp }}/mathematics-coverage.xml
+          if-no-files-found: warn
 
   # ARM64/NEON coverage. The SSE and NEON backends are separate code paths, so
   # without this the NEON path would ship untested.
@@ -111,7 +187,7 @@ jobs:
         run: cmake --build build
 
       - name: Report detected configuration
-        run: ./build/tools/mathf_config_report
+        run: ./build/tools/mathematics_config_report
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

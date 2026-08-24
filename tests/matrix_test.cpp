@@ -1,41 +1,41 @@
-// Matrix4x4 and Matrix3x3.
+// matrix4x4 and matrix3x3.
 //
 // The convention tests matter more than the arithmetic ones here. A matrix
 // library with row/column or pre/post-multiply backwards still multiplies
 // without complaint and produces a self-consistent world that renders wrong, so
 // the layout, the multiplication order, and the translation row are each pinned
-// against DirectXMath rather than against Mathf's own output.
+// against DirectXMath rather than against Mathematics's own output.
 
 #include "support/reg_testing.hpp"
 
-#include <mathf/matrix.hpp>
+#include <mathematics/matrix.hpp>
 
 #if __has_include(<DirectXMath.h>)
 #  include <DirectXMath.h>
-#  define MATHF_TEST_HAS_DXMATH 1
+#  define MATHEMATICS_TEST_HAS_DXMATH 1
 #else
-#  define MATHF_TEST_HAS_DXMATH 0
+#  define MATHEMATICS_TEST_HAS_DXMATH 0
 #endif
 
 namespace {
 
-using namespace mathf_test;
-using mathf::Matrix3x3;
-using mathf::Matrix4x4;
-using mathf::Vector3;
-using mathf::Vector4;
+using namespace math_test;
+using math::matrix3x3;
+using math::matrix4x4;
+using math::vector3;
+using math::vector4;
 
 // Distinct, non-symmetric entries: a transpose or index swap that went unnoticed
 // with 1..16 in the wrong order would show up immediately.
-constexpr Matrix4x4 kCounting{ 1,  2,  3,  4,
+constexpr matrix4x4 counting_matrix{ 1,  2,  3,  4,
                                5,  6,  7,  8,
                                9, 10, 11, 12,
                               13, 14, 15, 16};
 
-Matrix4x4 RandomMatrix(RandomVectors& gen) {
-    Matrix4x4 r;
+matrix4x4 random_matrix(random_vectors& gen) {
+    matrix4x4 r;
     for (int i = 0; i < 4; ++i) {
-        const Sample s = gen.Next();
+        const sample s = gen.next();
         for (int j = 0; j < 4; ++j) r.m[i][j] = s.f[j];
     }
     return r;
@@ -43,8 +43,8 @@ Matrix4x4 RandomMatrix(RandomVectors& gen) {
 
 // Invertible by construction: a random matrix is almost surely non-singular,
 // but "almost surely" is not a test guarantee, so the diagonal is biased.
-Matrix4x4 RandomInvertibleMatrix(RandomVectors& gen) {
-    Matrix4x4 r = RandomMatrix(gen);
+matrix4x4 random_invertible_matrix(random_vectors& gen) {
+    matrix4x4 r = random_matrix(gen);
     for (int i = 0; i < 4; ++i) r.m[i][i] += 200.0f;
     return r;
 }
@@ -52,290 +52,290 @@ Matrix4x4 RandomInvertibleMatrix(RandomVectors& gen) {
 } // namespace
 
 // ---------------------------------------------------------------------- layout
-static_assert(sizeof(Matrix4x4) == 64);
-static_assert(sizeof(Matrix3x3) == 36);
+static_assert(sizeof(matrix4x4) == 64);
+static_assert(sizeof(matrix3x3) == 36);
 
 // Row-major: the first four floats in memory are the first ROW, not the first
 // column. Everything else in the file depends on this being true.
-TEST(MatrixLayout, StorageIsRowMajor) {
-    const float* raw = &kCounting.m[0][0];
+TEST(matrix_layout, storage_is_row_major) {
+    const float* raw = &counting_matrix.m[0][0];
     EXPECT_FLOAT_EQ(raw[0], 1.0f);
     EXPECT_FLOAT_EQ(raw[1], 2.0f) << "second float must be row 0 column 1";
     EXPECT_FLOAT_EQ(raw[4], 5.0f) << "fifth float must start row 1";
 
-    EXPECT_TRUE(kCounting.GetRow(0) == Vector4(1, 2, 3, 4));
-    EXPECT_TRUE(kCounting.GetColumn(0) == Vector4(1, 5, 9, 13));
+    EXPECT_TRUE(counting_matrix.get_row(0) == vector4(1, 2, 3, 4));
+    EXPECT_TRUE(counting_matrix.get_column(0) == vector4(1, 5, 9, 13));
 }
 
-TEST(MatrixLayout, ElementAccessAgreesWithStorage) {
-    EXPECT_FLOAT_EQ(kCounting(0, 1), 2.0f);
-    EXPECT_FLOAT_EQ(kCounting(1, 0), 5.0f);
-    EXPECT_FLOAT_EQ(kCounting(3, 3), 16.0f);
+TEST(matrix_layout, element_access_agrees_with_storage) {
+    EXPECT_FLOAT_EQ(counting_matrix(0, 1), 2.0f);
+    EXPECT_FLOAT_EQ(counting_matrix(1, 0), 5.0f);
+    EXPECT_FLOAT_EQ(counting_matrix(3, 3), 16.0f);
 }
 
 // ------------------------------------------------------------------- identity
-static_assert(Matrix4x4::Identity()(0, 0) == 1.0f);
-static_assert(Matrix4x4::Identity()(0, 1) == 0.0f);
-static_assert(Matrix4x4::Identity() * Matrix4x4::Identity() ==
-              Matrix4x4::Identity());
+static_assert(matrix4x4::identity()(0, 0) == 1.0f);
+static_assert(matrix4x4::identity()(0, 1) == 0.0f);
+static_assert(matrix4x4::identity() * matrix4x4::identity() ==
+              matrix4x4::identity());
 
-TEST(MatrixIdentity, IsAMultiplicativeIdentity) {
-    EXPECT_TRUE(kCounting * Matrix4x4::Identity() == kCounting);
-    EXPECT_TRUE(Matrix4x4::Identity() * kCounting == kCounting);
-    EXPECT_TRUE(Vector4(1, 2, 3, 4) * Matrix4x4::Identity() ==
-                Vector4(1, 2, 3, 4));
+TEST(matrix_identity, is_a_multiplicative_identity) {
+    EXPECT_TRUE(counting_matrix * matrix4x4::identity() == counting_matrix);
+    EXPECT_TRUE(matrix4x4::identity() * counting_matrix == counting_matrix);
+    EXPECT_TRUE(vector4(1, 2, 3, 4) * matrix4x4::identity() ==
+                vector4(1, 2, 3, 4));
 }
 
 // ------------------------------------------------------------------- multiply
 // Hand-computed, so it does not depend on any other operation being right.
-TEST(MatrixMultiply, MatchesHandComputedProduct) {
-    constexpr Matrix4x4 a{1, 2, 0, 0,
+TEST(matrix_multiply, matches_hand_computed_product) {
+    constexpr matrix4x4 a{1, 2, 0, 0,
                           0, 1, 0, 0,
                           0, 0, 1, 0,
                           0, 0, 0, 1};
-    constexpr Matrix4x4 b{1, 0, 0, 0,
+    constexpr matrix4x4 b{1, 0, 0, 0,
                           3, 1, 0, 0,
                           0, 0, 1, 0,
                           0, 0, 0, 1};
     // (a*b)[0] = 1*b.row0 + 2*b.row1 = (1,0,0,0) + (6,2,0,0) = (7,2,0,0)
-    const Matrix4x4 ab = a * b;
-    EXPECT_TRUE(ab.GetRow(0) == Vector4(7, 2, 0, 0));
-    EXPECT_TRUE(ab.GetRow(1) == Vector4(3, 1, 0, 0));
+    const matrix4x4 ab = a * b;
+    EXPECT_TRUE(ab.get_row(0) == vector4(7, 2, 0, 0));
+    EXPECT_TRUE(ab.get_row(1) == vector4(3, 1, 0, 0));
 }
 
 // Matrix multiplication does not commute, and a test built only from symmetric
 // or diagonal inputs would never notice an implementation that swapped its
 // operands.
-TEST(MatrixMultiply, DoesNotCommute) {
-    constexpr Matrix4x4 a{1, 2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    constexpr Matrix4x4 b{1, 0, 0, 0, 3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+TEST(matrix_multiply, does_not_commute) {
+    constexpr matrix4x4 a{1, 2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    constexpr matrix4x4 b{1, 0, 0, 0, 3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     EXPECT_FALSE(a * b == b * a);
 }
 
-// detail::MultiplyScalar runs ONLY during constant evaluation -- every build
-// configuration takes MultiplyAvx or CombineRows at run time -- and the only
+// detail::multiply_scalar runs ONLY during constant evaluation -- every build
+// configuration takes multiply_avx or combine_rows at run time -- and the only
 // constant-evaluated product before this was identity times identity, which is
 // symmetric and would survive a swapped row/column index untouched. This is the
-// same shape of hole that left Vector4's NormalizeWide unexecuted in Phase 2.
-TEST(MatrixMultiply, CompileTimeMatchesRuntime) {
-    constexpr Matrix4x4 a{1, 2, 0, 0,
+// same shape of hole that left vector4's normalize_wide unexecuted in Phase 2.
+TEST(matrix_multiply, compile_time_matches_runtime) {
+    constexpr matrix4x4 a{1, 2, 0, 0,
                           0, 1, 0, 0,
                           0, 0, 1, 0,
                           0, 0, 0, 1};
-    constexpr Matrix4x4 b{1, 0, 0, 0,
+    constexpr matrix4x4 b{1, 0, 0, 0,
                           3, 1, 0, 0,
                           0, 0, 1, 0,
                           0, 0, 0, 1};
-    constexpr Matrix4x4 compileTime = a * b;
-    static_assert(compileTime.m[0][0] == 7.0f);
-    static_assert(compileTime.m[0][1] == 2.0f);
-    static_assert(compileTime.m[1][0] == 3.0f);
-    // Not commutative, so this also pins which operand is which.
+    constexpr matrix4x4 compile_time = a * b;
+    static_assert(compile_time.m[0][0] == 7.0f);
+    static_assert(compile_time.m[0][1] == 2.0f);
+    static_assert(compile_time.m[1][0] == 3.0f);
+    // bit_not commutative, so this also pins which operand is which.
     static_assert((b * a).m[0][0] == 1.0f);
 
-    const Matrix4x4 runTime = a * b;
-    EXPECT_TRUE(compileTime == runTime);
+    const matrix4x4 run_time = a * b;
+    EXPECT_TRUE(compile_time == run_time);
 }
 
 // Small integers throughout, so every product is exact in float and the two
 // paths must agree bit for bit rather than merely closely -- a rounding
 // tolerance here would hide an index bug in the constexpr path.
-TEST(MatrixMultiply, CompileTimeMatchesRuntimeOnAFullMatrix) {
-    constexpr Matrix4x4 a{ 1,  2,  3,  4,
+TEST(matrix_multiply, compile_time_matches_runtime_on_a_full_matrix) {
+    constexpr matrix4x4 a{ 1,  2,  3,  4,
                            5,  6,  7,  8,
                            9, 10, 11, 12,
                           13, 14, 15, 16};
-    constexpr Matrix4x4 b{ 2,  0,  1,  3,
+    constexpr matrix4x4 b{ 2,  0,  1,  3,
                            1,  4,  0,  2,
                            0,  3,  5,  1,
                            6,  1,  2,  0};
-    constexpr Matrix4x4 compileTime = a * b;
-    const Matrix4x4 runTime = a * b;
-    EXPECT_TRUE(compileTime == runTime)
-        << "MultiplyScalar disagrees with the active runtime backend";
+    constexpr matrix4x4 compile_time = a * b;
+    const matrix4x4 run_time = a * b;
+    EXPECT_TRUE(compile_time == run_time)
+        << "multiply_scalar disagrees with the active runtime backend";
 }
 
-TEST(MatrixMultiply, IsAssociative) {
-    RandomVectors gen(kSeed + 90);
+TEST(matrix_multiply, is_associative) {
+    random_vectors gen(random_seed + 90);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomMatrix(gen);
-        const Matrix4x4 b = RandomMatrix(gen);
-        const Matrix4x4 c = RandomMatrix(gen);
+        const matrix4x4 a = random_matrix(gen);
+        const matrix4x4 b = random_matrix(gen);
+        const matrix4x4 c = random_matrix(gen);
         // Entries reach 1e6 after two products, so the tolerance scales with them.
-        EXPECT_TRUE(mathf::NearEqual((a * b) * c, a * (b * c), 1.0f)) << n;
+        EXPECT_TRUE(math::near_equal((a * b) * c, a * (b * c), 1.0f)) << n;
     }
 }
 
 // -------------------------------------------------- convention: row vectors
 // The defining property of the row-vector convention. Under the column-vector
 // convention this test fails, which is the point of having it.
-TEST(MatrixConvention, VectorsAreRowVectors) {
+TEST(matrix_convention, vectors_are_row_vectors) {
     // A matrix whose row 0 is (0,1,0,0) sends x to y.
-    constexpr Matrix4x4 swapXY{0, 1, 0, 0,
+    constexpr matrix4x4 swap_xy{0, 1, 0, 0,
                                1, 0, 0, 0,
                                0, 0, 1, 0,
                                0, 0, 0, 1};
-    EXPECT_TRUE(Vector4(1, 0, 0, 0) * swapXY == Vector4(0, 1, 0, 0));
+    EXPECT_TRUE(vector4(1, 0, 0, 0) * swap_xy == vector4(0, 1, 0, 0));
 }
 
-// Translation lives in row 3. Putting it in column 3 -- the column-vector
+// translation lives in row 3. Putting it in column 3 -- the column-vector
 // convention -- would leave every position untranslated.
-TEST(MatrixConvention, TranslationLivesInRowThree) {
-    constexpr Matrix4x4 translate{1, 0, 0, 0,
+TEST(matrix_convention, translation_lives_in_row_three) {
+    constexpr matrix4x4 translate{1, 0, 0, 0,
                                   0, 1, 0, 0,
                                   0, 0, 1, 0,
                                   10, 20, 30, 1};
-    EXPECT_TRUE(mathf::TransformPoint(Vector3(1, 2, 3), translate) ==
-                Vector3(11, 22, 33));
-    EXPECT_TRUE(translate.Translation() == Vector3(10, 20, 30));
+    EXPECT_TRUE(math::transform_point(vector3(1, 2, 3), translate) ==
+                vector3(11, 22, 33));
+    EXPECT_TRUE(translate.translation() == vector3(10, 20, 30));
 }
 
 // Composition reads left to right in application order.
-TEST(MatrixConvention, CompositionAppliesLeftToRight) {
-    constexpr Matrix4x4 scale2{2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1};
-    constexpr Matrix4x4 translate10{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
+TEST(matrix_convention, composition_applies_left_to_right) {
+    constexpr matrix4x4 scale2{2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1};
+    constexpr matrix4x4 translate10{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
                                     10, 0, 0, 1};
 
     // scale * translate: scale first, then translate. 1 -> 2 -> 12.
-    EXPECT_TRUE(mathf::TransformPoint(Vector3(1, 0, 0), scale2 * translate10) ==
-                Vector3(12, 0, 0));
+    EXPECT_TRUE(math::transform_point(vector3(1, 0, 0), scale2 * translate10) ==
+                vector3(12, 0, 0));
     // The other order translates first, then scales that too. 1 -> 11 -> 22.
-    EXPECT_TRUE(mathf::TransformPoint(Vector3(1, 0, 0), translate10 * scale2) ==
-                Vector3(22, 0, 0));
+    EXPECT_TRUE(math::transform_point(vector3(1, 0, 0), translate10 * scale2) ==
+                vector3(22, 0, 0));
 }
 
 // The whole reason the two transform functions have separate names.
-TEST(MatrixConvention, TransformDirectionIgnoresTranslation) {
-    constexpr Matrix4x4 translate{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
+TEST(matrix_convention, transform_direction_ignores_translation) {
+    constexpr matrix4x4 translate{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0,
                                   10, 20, 30, 1};
-    EXPECT_TRUE(mathf::TransformDirection(Vector3(1, 0, 0), translate) ==
-                Vector3(1, 0, 0));
-    EXPECT_TRUE(mathf::TransformPoint(Vector3(1, 0, 0), translate) ==
-                Vector3(11, 20, 30));
+    EXPECT_TRUE(math::transform_direction(vector3(1, 0, 0), translate) ==
+                vector3(1, 0, 0));
+    EXPECT_TRUE(math::transform_point(vector3(1, 0, 0), translate) ==
+                vector3(11, 20, 30));
 }
 
 // ----------------------------------------------------------------- comparison
-// NearEqual once reported a matrix of NaNs as near-equal to the identity. The
+// near_equal once reported a matrix of NaNs as near-equal to the identity. The
 // test written as `diff > eps || diff < -eps` never fires on a NaN, because
 // every comparison against a NaN is false -- so the loop fell through to
 // "equal". That mattered well beyond the helper itself: almost every inverse and
-// multiply assertion in this file goes through NearEqual, so a bug producing a
+// multiply assertion in this file goes through near_equal, so a bug producing a
 // NaN made the surrounding test pass rather than fail.
-TEST(MatrixNearEqual, RejectsNaN) {
-    Matrix4x4 withNan = Matrix4x4::Identity();
-    withNan.m[1][2] = QuietNaN();
-    EXPECT_FALSE(mathf::NearEqual(withNan, Matrix4x4::Identity()));
-    EXPECT_FALSE(mathf::NearEqual(Matrix4x4::Identity(), withNan));
+TEST(matrix_near_equal, rejects_na_n) {
+    matrix4x4 with_nan = matrix4x4::identity();
+    with_nan.m[1][2] = quiet_nan();
+    EXPECT_FALSE(math::near_equal(with_nan, matrix4x4::identity()));
+    EXPECT_FALSE(math::near_equal(matrix4x4::identity(), with_nan));
 
-    Matrix4x4 allNan;
-    for (auto& row : allNan.m) for (auto& e : row) e = QuietNaN();
-    EXPECT_FALSE(mathf::NearEqual(allNan, Matrix4x4::Identity()));
-    EXPECT_FALSE(mathf::NearEqual(allNan, allNan))
+    matrix4x4 all_nan;
+    for (auto& row : all_nan.m) for (auto& e : row) e = quiet_nan();
+    EXPECT_FALSE(math::near_equal(all_nan, matrix4x4::identity()));
+    EXPECT_FALSE(math::near_equal(all_nan, all_nan))
         << "a NaN is near nothing, not even itself";
 
-    Matrix3x3 nan3 = Matrix3x3::Identity();
-    nan3.m[0][1] = QuietNaN();
-    EXPECT_FALSE(mathf::NearEqual(nan3, Matrix3x3::Identity()));
+    matrix3x3 nan3 = matrix3x3::identity();
+    nan3.m[0][1] = quiet_nan();
+    EXPECT_FALSE(math::near_equal(nan3, matrix3x3::identity()));
 
     // The scenario the helper exists to catch: a NaN anywhere in a product must
     // fail an identity check, not slip through it.
-    constexpr Matrix4x4 m{2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 1};
-    Matrix4x4 spoiled = Inverse(m);
-    spoiled.m[2][2] = QuietNaN();
-    EXPECT_FALSE(mathf::NearEqual(m * spoiled, Matrix4x4::Identity(), 1e-3f));
+    constexpr matrix4x4 m{2, 0, 0, 0, 0, 4, 0, 0, 0, 0, 8, 0, 0, 0, 0, 1};
+    matrix4x4 spoiled = inverse(m);
+    spoiled.m[2][2] = quiet_nan();
+    EXPECT_FALSE(math::near_equal(m * spoiled, matrix4x4::identity(), 1e-3f));
 }
 
-TEST(MatrixNearEqual, AcceptsWhatItShould) {
-    EXPECT_TRUE(mathf::NearEqual(kCounting, kCounting));
-    Matrix4x4 nudged = kCounting;
+TEST(matrix_near_equal, accepts_what_it_should) {
+    EXPECT_TRUE(math::near_equal(counting_matrix, counting_matrix));
+    matrix4x4 nudged = counting_matrix;
     nudged.m[2][1] += 1e-7f;
-    EXPECT_TRUE(mathf::NearEqual(nudged, kCounting));
+    EXPECT_TRUE(math::near_equal(nudged, counting_matrix));
     nudged.m[2][1] += 1.0f;
-    EXPECT_FALSE(mathf::NearEqual(nudged, kCounting));
+    EXPECT_FALSE(math::near_equal(nudged, counting_matrix));
 }
 
 // ------------------------------------------------------------------ transpose
-static_assert(Transpose(Matrix4x4::Identity()) == Matrix4x4::Identity());
+static_assert(transpose(matrix4x4::identity()) == matrix4x4::identity());
 
-TEST(MatrixTranspose, SwapsRowsAndColumns) {
-    const Matrix4x4 t = Transpose(kCounting);
+TEST(matrix_transpose, swaps_rows_and_columns) {
+    const matrix4x4 t = transpose(counting_matrix);
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
-            EXPECT_FLOAT_EQ(t.m[i][j], kCounting.m[j][i]) << i << "," << j;
+            EXPECT_FLOAT_EQ(t.m[i][j], counting_matrix.m[j][i]) << i << "," << j;
         }
     }
 }
 
-TEST(MatrixTranspose, IsItsOwnInverse) {
-    EXPECT_TRUE(Transpose(Transpose(kCounting)) == kCounting);
+TEST(matrix_transpose, is_its_own_inverse) {
+    EXPECT_TRUE(transpose(transpose(counting_matrix)) == counting_matrix);
 }
 
 // ---------------------------------------------------------------- determinant
-static_assert(Determinant(Matrix4x4::Identity()) == 1.0f);
-static_assert(Determinant(Matrix3x3::Identity()) == 1.0f);
+static_assert(determinant(matrix4x4::identity()) == 1.0f);
+static_assert(determinant(matrix3x3::identity()) == 1.0f);
 
-TEST(MatrixDeterminant, KnownValues) {
+TEST(matrix_determinant, known_values) {
     // A diagonal matrix's determinant is the product of its diagonal.
-    constexpr Matrix4x4 diagonal{2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 5};
-    EXPECT_FLOAT_EQ(Determinant(diagonal), 120.0f);
+    constexpr matrix4x4 diagonal{2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 5};
+    EXPECT_FLOAT_EQ(determinant(diagonal), 120.0f);
 
     // The counting matrix is singular -- its rows are linearly dependent.
-    EXPECT_NEAR(Determinant(kCounting), 0.0f, 1e-3f);
+    EXPECT_NEAR(determinant(counting_matrix), 0.0f, 1e-3f);
 
-    EXPECT_FLOAT_EQ(Determinant(Matrix3x3{2, 0, 0, 0, 3, 0, 0, 0, 4}), 24.0f);
+    EXPECT_FLOAT_EQ(determinant(matrix3x3{2, 0, 0, 0, 3, 0, 0, 0, 4}), 24.0f);
 }
 
-TEST(MatrixDeterminant, IsMultiplicative) {
-    RandomVectors gen(kSeed + 91);
+TEST(matrix_determinant, is_multiplicative) {
+    random_vectors gen(random_seed + 91);
     for (int n = 0; n < 32; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
-        const Matrix4x4 b = RandomInvertibleMatrix(gen);
-        const float lhs = Determinant(a * b);
-        const float rhs = Determinant(a) * Determinant(b);
+        const matrix4x4 a = random_invertible_matrix(gen);
+        const matrix4x4 b = random_invertible_matrix(gen);
+        const float lhs = determinant(a * b);
+        const float rhs = determinant(a) * determinant(b);
         EXPECT_NEAR(lhs, rhs, std::abs(rhs) * 1e-3f) << n;
     }
 }
 
 // -------------------------------------------------------------------- inverse
-TEST(MatrixInverse, TimesTheOriginalIsIdentity) {
-    RandomVectors gen(kSeed + 92);
+TEST(matrix_inverse, times_the_original_is_identity) {
+    random_vectors gen(random_seed + 92);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
-        EXPECT_TRUE(mathf::NearEqual(a * Inverse(a), Matrix4x4::Identity(), 1e-3f))
+        const matrix4x4 a = random_invertible_matrix(gen);
+        EXPECT_TRUE(math::near_equal(a * inverse(a), matrix4x4::identity(), 1e-3f))
             << n;
-        EXPECT_TRUE(mathf::NearEqual(Inverse(a) * a, Matrix4x4::Identity(), 1e-3f))
+        EXPECT_TRUE(math::near_equal(inverse(a) * a, matrix4x4::identity(), 1e-3f))
             << n;
     }
 }
 
-TEST(MatrixInverse, InvertsATransform) {
-    constexpr Matrix4x4 transform{2, 0, 0, 0,
+TEST(matrix_inverse, inverts_a_transform) {
+    constexpr matrix4x4 transform{2, 0, 0, 0,
                                   0, 3, 0, 0,
                                   0, 0, 4, 0,
                                   10, 20, 30, 1};
-    const Matrix4x4 back = Inverse(transform);
-    const Vector3 point{1, 2, 3};
-    EXPECT_TRUE(mathf::NearEqual(
-        mathf::TransformPoint(mathf::TransformPoint(point, transform), back),
+    const matrix4x4 back = inverse(transform);
+    const vector3 point{1, 2, 3};
+    EXPECT_TRUE(math::near_equal(
+        math::transform_point(math::transform_point(point, transform), back),
         point, 1e-4f));
 }
 
 // Documented behaviour, and different from DirectXMath's, so it gets a test of
 // its own rather than being left to whatever the arithmetic produces.
-TEST(MatrixInverse, SingularReturnsIdentity) {
-    EXPECT_TRUE(Inverse(kCounting) == Matrix4x4::Identity());
-    EXPECT_TRUE(Inverse(Matrix3x3{1, 2, 3, 2, 4, 6, 7, 8, 9}) ==
-                Matrix3x3::Identity());
+TEST(matrix_inverse, singular_returns_identity) {
+    EXPECT_TRUE(inverse(counting_matrix) == matrix4x4::identity());
+    EXPECT_TRUE(inverse(matrix3x3{1, 2, 3, 2, 4, 6, 7, 8, 9}) ==
+                matrix3x3::identity());
 }
 
-// Inverse has two implementations -- a vectorized one for run time and the
+// inverse has two implementations -- a vectorized one for run time and the
 // scalar Laplace expansion it was derived from, which also serves constant
 // evaluation and the scalar backend. Two implementations of one contract need
 // checking against each other, not just against DirectXMath: a shared
 // misunderstanding of the convention would pass a self-comparison, and a
 // transcription slip in the vector version would pass nothing else.
-static_assert(Inverse(Matrix4x4::Identity()) == Matrix4x4::Identity());
-static_assert(Inverse(Matrix4x4{2, 0, 0, 0,
+static_assert(inverse(matrix4x4::identity()) == matrix4x4::identity());
+static_assert(inverse(matrix4x4{2, 0, 0, 0,
                                 0, 4, 0, 0,
                                 0, 0, 8, 0,
                                 0, 0, 0, 1})(1, 1) == 0.25f);
@@ -346,78 +346,78 @@ static_assert(Inverse(Matrix4x4{2, 0, 0, 0,
 // complementary-minor expansion touches, and determinant 1, so the exact inverse
 // is representable and the assertion can be equality.
 namespace {
-constexpr Matrix4x4 kUnitTriangular{1, 0, 0, 0,
+constexpr matrix4x4 unit_triangular_matrix{1, 0, 0, 0,
                                     2, 1, 0, 0,
                                     3, 4, 1, 0,
                                     5, 6, 7, 1};
 }
-static_assert(Determinant(kUnitTriangular) == 1.0f);
-static_assert(Determinant(Transpose(kUnitTriangular)) == 1.0f);
-static_assert(Inverse(kUnitTriangular) * kUnitTriangular ==
-              Matrix4x4::Identity());
-static_assert(Inverse(kUnitTriangular)(3, 0) == -28.0f);
-static_assert(Inverse(kUnitTriangular)(3, 1) == 22.0f);
-static_assert(Inverse(kUnitTriangular)(2, 0) == 5.0f);
+static_assert(determinant(unit_triangular_matrix) == 1.0f);
+static_assert(determinant(transpose(unit_triangular_matrix)) == 1.0f);
+static_assert(inverse(unit_triangular_matrix) * unit_triangular_matrix ==
+              matrix4x4::identity());
+static_assert(inverse(unit_triangular_matrix)(3, 0) == -28.0f);
+static_assert(inverse(unit_triangular_matrix)(3, 1) == 22.0f);
+static_assert(inverse(unit_triangular_matrix)(2, 0) == 5.0f);
 
-TEST(MatrixInverse, VectorAndScalarPathsAgree) {
-    RandomVectors gen(kSeed + 94);
+TEST(matrix_inverse, vector_and_scalar_paths_agree) {
+    random_vectors gen(random_seed + 94);
     for (int n = 0; n < 128; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
-        EXPECT_TRUE(mathf::NearEqual(Inverse(a), mathf::detail::InverseScalar(a),
+        const matrix4x4 a = random_invertible_matrix(gen);
+        EXPECT_TRUE(math::near_equal(inverse(a), math::detail::inverse_scalar(a),
                                      1e-5f)) << n;
     }
 }
 
 // The compile-time path is the scalar one, so a constexpr result and a runtime
 // result on the same input come from different code and must still agree.
-TEST(MatrixInverse, CompileTimeMatchesRuntime) {
-    constexpr Matrix4x4 source{2, 1, 0, 0,
+TEST(matrix_inverse, compile_time_matches_runtime) {
+    constexpr matrix4x4 source{2, 1, 0, 0,
                                0, 3, 1, 0,
                                0, 0, 4, 1,
                                1, 0, 0, 5};
-    constexpr Matrix4x4 compileTime = Inverse(source);
-    const Matrix4x4 runTime = Inverse(source);
-    EXPECT_TRUE(mathf::NearEqual(compileTime, runTime, 1e-5f));
+    constexpr matrix4x4 compile_time = inverse(source);
+    const matrix4x4 run_time = inverse(source);
+    EXPECT_TRUE(math::near_equal(compile_time, run_time, 1e-5f));
 }
 
 // A hand-computed inverse, with no reference library involved. Every other
 // inverse test either compares the two implementations to each other or leans on
 // DirectXMath, and DirectXMath is only available on the Windows legs -- so on
-// Linux ARM64 nothing outside Mathf ever checked this answer. The matrix is
+// Linux ARM64 nothing outside Mathematics ever checked this answer. The matrix is
 // lower-triangular with a unit diagonal, whose inverse is exact in float, so
 // this can assert equality rather than nearness.
-TEST(MatrixInverse, MatchesHandComputedInverse) {
-    constexpr Matrix4x4 m{1, 0, 0, 0,
+TEST(matrix_inverse, matches_hand_computed_inverse) {
+    constexpr matrix4x4 m{1, 0, 0, 0,
                           2, 1, 0, 0,
                           3, 4, 1, 0,
                           5, 6, 7, 1};
-    // Inverse of a unit lower-triangular matrix, by forward substitution:
+    // inverse of a unit lower-triangular matrix, by forward substitution:
     //   row1: -2
     //   row2: -(3) - (4)(-2) = 5,  -4
     //   row3: -(5) - 6(-2) - 7(5) = -28,  -(6) - 7(-4) = 22,  -7
-    constexpr Matrix4x4 expected{ 1,  0,  0, 0,
+    constexpr matrix4x4 expected{ 1,  0,  0, 0,
                                  -2,  1,  0, 0,
                                   5, -4,  1, 0,
                                 -28, 22, -7, 1};
-    EXPECT_TRUE(Inverse(m) == expected);
-    EXPECT_TRUE(mathf::detail::InverseScalar(m) == expected);
-    static_assert(Inverse(m) == expected);
+    EXPECT_TRUE(inverse(m) == expected);
+    EXPECT_TRUE(math::detail::inverse_scalar(m) == expected);
+    static_assert(inverse(m) == expected);
 }
 
 namespace {
 
 // A 4x4 inverse in double by Gauss-Jordan with partial pivoting. This shares no
 // algebra at all with a cofactor expansion, which is the point: the tests either
-// compare Mathf's two implementations to each other -- and both descend from the
+// compare Mathematics's two implementations to each other -- and both descend from the
 // same Laplace expansion, so a shared misunderstanding survives -- or lean on
 // DirectXMath, which only exists on the Windows legs. On Linux ARM64 nothing
-// outside Mathf checked these answers at all.
-struct DoubleInverse {
+// outside Mathematics checked these answers at all.
+struct double_inverse {
     double m[4][4];
     bool ok;
 };
 
-DoubleInverse ReferenceInverse(const Matrix4x4& src) {
+double_inverse reference_inverse(const matrix4x4& src) {
     double a[4][8] = {};
     double scale = 0.0;
     for (int i = 0; i < 4; ++i) {
@@ -427,7 +427,7 @@ DoubleInverse ReferenceInverse(const Matrix4x4& src) {
         }
         a[i][4 + i] = 1.0;
     }
-    if (scale == 0.0) return DoubleInverse{{}, false};
+    if (scale == 0.0) return double_inverse{{}, false};
 
     for (int col = 0; col < 4; ++col) {
         int piv = col;
@@ -436,7 +436,7 @@ DoubleInverse ReferenceInverse(const Matrix4x4& src) {
         }
         // Relative, not `== 0`: elimination is inexact even in double, so an
         // exactly singular float matrix leaves a tiny pivot rather than a zero.
-        if (std::fabs(a[piv][col]) < 1e-12 * scale) return DoubleInverse{{}, false};
+        if (std::fabs(a[piv][col]) < 1e-12 * scale) return double_inverse{{}, false};
         if (piv != col) {
             for (int j = 0; j < 8; ++j) std::swap(a[col][j], a[piv][j]);
         }
@@ -450,7 +450,7 @@ DoubleInverse ReferenceInverse(const Matrix4x4& src) {
         }
     }
 
-    DoubleInverse out{};
+    double_inverse out{};
     out.ok = true;
     for (int i = 0; i < 4; ++i)
         for (int j = 0; j < 4; ++j) out.m[i][j] = a[i][4 + j];
@@ -460,14 +460,14 @@ DoubleInverse ReferenceInverse(const Matrix4x4& src) {
 } // namespace
 
 // Runs on every backend including NEON, where no external library is available.
-TEST(MatrixInverse, MatchesDoublePrecisionGaussJordan) {
-    RandomVectors gen(kSeed + 95);
+TEST(matrix_inverse, matches_double_precision_gauss_jordan) {
+    random_vectors gen(random_seed + 95);
     int checked = 0;
     double worst = 0.0;
 
     for (int n = 0; n < 512; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
-        const DoubleInverse ref = ReferenceInverse(a);
+        const matrix4x4 a = random_invertible_matrix(gen);
+        const double_inverse ref = reference_inverse(a);
         ASSERT_TRUE(ref.ok) << n << ": diagonal-biased matrix should invert";
 
         double scale = 0.0;
@@ -475,7 +475,7 @@ TEST(MatrixInverse, MatchesDoublePrecisionGaussJordan) {
             for (int j = 0; j < 4; ++j)
                 scale = std::fmax(scale, std::fabs(ref.m[i][j]));
 
-        const Matrix4x4 got = Inverse(a);
+        const matrix4x4 got = inverse(a);
         double err = 0.0;
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
@@ -498,8 +498,8 @@ TEST(MatrixInverse, MatchesDoublePrecisionGaussJordan) {
 // an uninitialized bone, a zero scale, a duplicated row -- and unlike a matrix
 // that is merely close to singular, every one of them drives the determinant to
 // exactly zero in both implementations, so the two agree.
-TEST(MatrixInverse, RealisticSingularInputsReturnIdentity) {
-    const Matrix4x4 cases[] = {
+TEST(matrix_inverse, realistic_singular_inputs_return_identity) {
+    const matrix4x4 cases[] = {
         {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},   // zero row
         {1, 2, 3, 4, 1, 2, 3, 4, 9, 10, 11, 13, 14, 15, 17, 19},  // duplicate
         {1, 2, 3, 4, 5, 6, 7, 8, 6, 8, 10, 12, 1, 0, 0, 1},    // row2 = r0 + r1
@@ -507,43 +507,43 @@ TEST(MatrixInverse, RealisticSingularInputsReturnIdentity) {
         {2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1},      // zero scale on Y
     };
     for (int n = 0; n < static_cast<int>(std::size(cases)); ++n) {
-        EXPECT_FLOAT_EQ(Determinant(cases[n]), 0.0f) << n;
-        EXPECT_TRUE(Inverse(cases[n]) == Matrix4x4::Identity()) << n;
-        EXPECT_TRUE(mathf::detail::InverseScalar(cases[n]) ==
-                    Matrix4x4::Identity()) << n;
+        EXPECT_FLOAT_EQ(determinant(cases[n]), 0.0f) << n;
+        EXPECT_TRUE(inverse(cases[n]) == matrix4x4::identity()) << n;
+        EXPECT_TRUE(math::detail::inverse_scalar(cases[n]) ==
+                    matrix4x4::identity()) << n;
     }
 }
 
 // The guard rejects any determinant that is not a finite non-zero, not merely an
 // exact zero. Without that, a matrix holding an infinity divided by a NaN
 // determinant and returned sixteen NaNs from the scalar path while the vector
-// path returned zeros -- so Inverse answered differently at compile time than at
+// path returned zeros -- so inverse answered differently at compile time than at
 // run time, and differently on a scalar build than on an SSE one.
-TEST(MatrixInverse, NonFiniteAndOverflowingInputsReturnIdentity) {
+TEST(matrix_inverse, non_finite_and_overflowing_inputs_return_identity) {
     const float inf = std::numeric_limits<float>::infinity();
-    const Matrix4x4 cases[] = {
+    const matrix4x4 cases[] = {
         {inf, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
-        {QuietNaN(), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+        {quiet_nan(), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1},
         {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, inf, 0, 0, 1},
-        // Determinant overflows to infinity though every entry is finite.
+        // determinant overflows to infinity though every entry is finite.
         {1e10f, 0, 0, 0, 0, 1e10f, 0, 0, 0, 0, 1e10f, 0, 0, 0, 0, 1e10f},
     };
     for (int n = 0; n < static_cast<int>(std::size(cases)); ++n) {
-        EXPECT_TRUE(Inverse(cases[n]) == Matrix4x4::Identity()) << n;
-        EXPECT_TRUE(mathf::detail::InverseScalar(cases[n]) ==
-                    Matrix4x4::Identity()) << n
+        EXPECT_TRUE(inverse(cases[n]) == matrix4x4::identity()) << n;
+        EXPECT_TRUE(math::detail::inverse_scalar(cases[n]) ==
+                    matrix4x4::identity()) << n
             << " -- the two paths must agree here, not just each be defensible";
     }
 
-    EXPECT_TRUE(mathf::Inverse(Matrix3x3{inf, 0, 0, 0, 1, 0, 0, 0, 1}) ==
-                Matrix3x3::Identity());
+    EXPECT_TRUE(math::inverse(matrix3x3{inf, 0, 0, 0, 1, 0, 0, 0, 1}) ==
+                matrix3x3::identity());
 }
 
-TEST(Matrix3x3Inverse, TimesTheOriginalIsIdentity) {
-    RandomVectors gen(kSeed + 93);
+TEST(matrix3x3_inverse, times_the_original_is_identity) {
+    random_vectors gen(random_seed + 93);
     for (int n = 0; n < 64; ++n) {
-        Matrix3x3 a;
-        const Sample s0 = gen.Next(), s1 = gen.Next(), s2 = gen.Next();
+        matrix3x3 a;
+        const sample s0 = gen.next(), s1 = gen.next(), s2 = gen.next();
         for (int j = 0; j < 3; ++j) {
             a.m[0][j] = s0.f[j];
             a.m[1][j] = s1.f[j];
@@ -551,48 +551,48 @@ TEST(Matrix3x3Inverse, TimesTheOriginalIsIdentity) {
         }
         for (int i = 0; i < 3; ++i) a.m[i][i] += 200.0f;
 
-        EXPECT_TRUE(mathf::NearEqual(a * Inverse(a), Matrix3x3::Identity(), 1e-3f))
+        EXPECT_TRUE(math::near_equal(a * inverse(a), matrix3x3::identity(), 1e-3f))
             << n;
     }
 }
 
-TEST(Matrix3x3, TransposeAndMultiply) {
-    constexpr Matrix3x3 a{1, 2, 3, 4, 5, 6, 7, 8, 9};
-    const Matrix3x3 t = Transpose(a);
+TEST(matrix3x3, transpose_and_multiply) {
+    constexpr matrix3x3 a{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    const matrix3x3 t = transpose(a);
     EXPECT_FLOAT_EQ(t(0, 1), 4.0f);
     EXPECT_FLOAT_EQ(t(1, 0), 2.0f);
-    EXPECT_TRUE(a * Matrix3x3::Identity() == a);
-    EXPECT_TRUE(Vector3(1, 0, 0) * a == Vector3(1, 2, 3))
+    EXPECT_TRUE(a * matrix3x3::identity() == a);
+    EXPECT_TRUE(vector3(1, 0, 0) * a == vector3(1, 2, 3))
         << "a row vector picks out row 0";
 }
 
-// Every Matrix3x3 operation is marked constexpr; nothing proved any of them
+// Every matrix3x3 operation is marked constexpr; nothing proved any of them
 // could actually be used in a constant expression. Operands are non-symmetric
 // and non-diagonal, so an index swap or a cofactor sign error has somewhere to
 // show up -- a diagonal matrix would hide both.
 namespace {
-constexpr Matrix3x3 kAsym3{1, 2, 3,
+constexpr matrix3x3 asymmetric_matrix3{1, 2, 3,
                            0, 1, 4,
                            5, 6, 0};
 }
-static_assert(Transpose(kAsym3)(0, 1) == 0.0f);
-static_assert(Transpose(kAsym3)(2, 0) == 3.0f);
-static_assert(Determinant(kAsym3) == 1.0f);
-// Determinant 1 and integer entries, so the inverse is exact in float.
-static_assert(Inverse(kAsym3) == Matrix3x3{-24,  18,   5,
+static_assert(transpose(asymmetric_matrix3)(0, 1) == 0.0f);
+static_assert(transpose(asymmetric_matrix3)(2, 0) == 3.0f);
+static_assert(determinant(asymmetric_matrix3) == 1.0f);
+// determinant 1 and integer entries, so the inverse is exact in float.
+static_assert(inverse(asymmetric_matrix3) == matrix3x3{-24,  18,   5,
                                             20, -15,  -4,
                                             -5,   4,   1});
-static_assert((kAsym3 * Matrix3x3::Identity()) == kAsym3);
-static_assert((Vector3(1, 0, 0) * kAsym3) == Vector3(1, 2, 3));
+static_assert((asymmetric_matrix3 * matrix3x3::identity()) == asymmetric_matrix3);
+static_assert((vector3(1, 0, 0) * asymmetric_matrix3) == vector3(1, 2, 3));
 
 // ---------------------------------------------------------- DirectXMath parity
-// The convention checks above say Mathf is self-consistent. These say it agrees
+// The convention checks above say Mathematics is self-consistent. These say it agrees
 // with DirectXMath, which is what makes a matrix built by one usable by the
 // other.
-#if MATHF_TEST_HAS_DXMATH
+#if MATHEMATICS_TEST_HAS_DXMATH
 namespace {
 
-DirectX::XMMATRIX ToXm(const Matrix4x4& mat) {
+DirectX::XMMATRIX to_xm(const matrix4x4& mat) {
     return DirectX::XMMatrixSet(
         mat.m[0][0], mat.m[0][1], mat.m[0][2], mat.m[0][3],
         mat.m[1][0], mat.m[1][1], mat.m[1][2], mat.m[1][3],
@@ -600,10 +600,10 @@ DirectX::XMMATRIX ToXm(const Matrix4x4& mat) {
         mat.m[3][0], mat.m[3][1], mat.m[3][2], mat.m[3][3]);
 }
 
-Matrix4x4 FromXm(DirectX::FXMMATRIX xm) {
+matrix4x4 from_xm(DirectX::FXMMATRIX xm) {
     DirectX::XMFLOAT4X4 out{};
     DirectX::XMStoreFloat4x4(&out, xm);
-    Matrix4x4 r;
+    matrix4x4 r;
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) r.m[i][j] = out.m[i][j];
     }
@@ -612,105 +612,105 @@ Matrix4x4 FromXm(DirectX::FXMMATRIX xm) {
 
 } // namespace
 
-// If XMFLOAT4X4's memory layout did not match Matrix4x4's, everything below
+// If XMFLOAT4X4's memory layout did not match matrix4x4's, everything below
 // would still "pass" while describing different matrices. Checked first.
-TEST(MatrixDxParity, StorageLayoutMatchesXMFLOAT4X4) {
+TEST(matrix_dx_parity, storage_layout_matches_xmfloat4_x4) {
     DirectX::XMFLOAT4X4 xf{};
-    DirectX::XMStoreFloat4x4(&xf, ToXm(kCounting));
-    const float* mine = &kCounting.m[0][0];
+    DirectX::XMStoreFloat4x4(&xf, to_xm(counting_matrix));
+    const float* mine = &counting_matrix.m[0][0];
     const float* theirs = &xf.m[0][0];
     for (int i = 0; i < 16; ++i) {
         EXPECT_FLOAT_EQ(mine[i], theirs[i]) << "float " << i;
     }
 }
 
-TEST(MatrixDxParity, MultiplyMatchesDirectXMath) {
-    RandomVectors gen(kSeed + 100);
+TEST(matrix_dx_parity, multiply_matches_direct_x_math) {
+    random_vectors gen(random_seed + 100);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomMatrix(gen);
-        const Matrix4x4 b = RandomMatrix(gen);
-        EXPECT_TRUE(mathf::NearEqual(
-            a * b, FromXm(DirectX::XMMatrixMultiply(ToXm(a), ToXm(b))), 1e-1f))
+        const matrix4x4 a = random_matrix(gen);
+        const matrix4x4 b = random_matrix(gen);
+        EXPECT_TRUE(math::near_equal(
+            a * b, from_xm(DirectX::XMMatrixMultiply(to_xm(a), to_xm(b))), 1e-1f))
             << n;
     }
 }
 
-TEST(MatrixDxParity, TransposeAndDeterminantMatchDirectXMath) {
-    RandomVectors gen(kSeed + 101);
+TEST(matrix_dx_parity, transpose_and_determinant_match_direct_x_math) {
+    random_vectors gen(random_seed + 101);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
+        const matrix4x4 a = random_invertible_matrix(gen);
 
-        EXPECT_TRUE(mathf::NearEqual(
-            Transpose(a), FromXm(DirectX::XMMatrixTranspose(ToXm(a))))) << n;
+        EXPECT_TRUE(math::near_equal(
+            transpose(a), from_xm(DirectX::XMMatrixTranspose(to_xm(a))))) << n;
 
         const float theirs =
-            DirectX::XMVectorGetX(DirectX::XMMatrixDeterminant(ToXm(a)));
-        EXPECT_NEAR(Determinant(a), theirs, std::abs(theirs) * 1e-3f) << n;
+            DirectX::XMVectorGetX(DirectX::XMMatrixDeterminant(to_xm(a)));
+        EXPECT_NEAR(determinant(a), theirs, std::abs(theirs) * 1e-3f) << n;
     }
 }
 
-TEST(MatrixDxParity, InverseMatchesDirectXMath) {
-    RandomVectors gen(kSeed + 102);
+TEST(matrix_dx_parity, inverse_matches_direct_x_math) {
+    random_vectors gen(random_seed + 102);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomInvertibleMatrix(gen);
+        const matrix4x4 a = random_invertible_matrix(gen);
         DirectX::XMVECTOR det;
-        const Matrix4x4 theirs =
-            FromXm(DirectX::XMMatrixInverse(&det, ToXm(a)));
-        EXPECT_TRUE(mathf::NearEqual(Inverse(a), theirs, 1e-4f)) << n;
+        const matrix4x4 theirs =
+            from_xm(DirectX::XMMatrixInverse(&det, to_xm(a)));
+        EXPECT_TRUE(math::near_equal(inverse(a), theirs, 1e-4f)) << n;
     }
 }
 
-// The convention test that matters most: a vector transformed by Mathf and by
+// The convention test that matters most: a vector transformed by Mathematics and by
 // DirectXMath through the same matrix must land in the same place.
-TEST(MatrixDxParity, VectorTransformMatchesDirectXMath) {
-    RandomVectors gen(kSeed + 103);
+TEST(matrix_dx_parity, vector_transform_matches_direct_x_math) {
+    random_vectors gen(random_seed + 103);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomMatrix(gen);
-        const Sample s = gen.Next();
-        const Vector4 v{s.f[0], s.f[1], s.f[2], s.f[3]};
+        const matrix4x4 a = random_matrix(gen);
+        const sample s = gen.next();
+        const vector4 v{s.f[0], s.f[1], s.f[2], s.f[3]};
 
         DirectX::XMFLOAT4 out{};
         DirectX::XMStoreFloat4(
             &out, DirectX::XMVector4Transform(
-                      DirectX::XMVectorSet(v.x, v.y, v.z, v.w), ToXm(a)));
+                      DirectX::XMVectorSet(v.x, v.y, v.z, v.w), to_xm(a)));
 
-        const Vector4 mine = v * a;
-        EXPECT_TRUE(mathf::NearEqual(mine, Vector4(out.x, out.y, out.z, out.w),
+        const vector4 mine = v * a;
+        EXPECT_TRUE(math::near_equal(mine, vector4(out.x, out.y, out.z, out.w),
                                      std::abs(out.x) * 1e-4f + 1e-2f)) << n;
     }
 }
 
-TEST(MatrixDxParity, PointAndDirectionTransformsMatchDirectXMath) {
-    RandomVectors gen(kSeed + 104);
+TEST(matrix_dx_parity, point_and_direction_transforms_match_direct_x_math) {
+    random_vectors gen(random_seed + 104);
     for (int n = 0; n < 64; ++n) {
-        const Matrix4x4 a = RandomMatrix(gen);
-        const Sample s = gen.Next();
-        const Vector3 v{s.f[0], s.f[1], s.f[2]};
+        const matrix4x4 a = random_matrix(gen);
+        const sample s = gen.next();
+        const vector3 v{s.f[0], s.f[1], s.f[2]};
         const DirectX::XMVECTOR xv = DirectX::XMVectorSet(v.x, v.y, v.z, 0.0f);
 
         DirectX::XMFLOAT3 point{};
         DirectX::XMStoreFloat3(
-            &point, DirectX::XMVector3TransformCoord(xv, ToXm(a)));
+            &point, DirectX::XMVector3TransformCoord(xv, to_xm(a)));
         DirectX::XMFLOAT3 direction{};
         DirectX::XMStoreFloat3(
-            &direction, DirectX::XMVector3TransformNormal(xv, ToXm(a)));
+            &direction, DirectX::XMVector3TransformNormal(xv, to_xm(a)));
 
         // TransformCoord divides by w; this matrix's bottom row is arbitrary, so
         // the comparison only holds where w came out as one. Use an affine
         // matrix for the coordinate check instead.
-        Matrix4x4 affine = a;
+        matrix4x4 affine = a;
         affine.m[0][3] = 0.0f; affine.m[1][3] = 0.0f;
         affine.m[2][3] = 0.0f; affine.m[3][3] = 1.0f;
         DirectX::XMStoreFloat3(
-            &point, DirectX::XMVector3TransformCoord(xv, ToXm(affine)));
+            &point, DirectX::XMVector3TransformCoord(xv, to_xm(affine)));
 
-        EXPECT_TRUE(mathf::NearEqual(mathf::TransformPoint(v, affine),
-                                     Vector3(point.x, point.y, point.z),
+        EXPECT_TRUE(math::near_equal(math::transform_point(v, affine),
+                                     vector3(point.x, point.y, point.z),
                                      1e-2f)) << n;
-        EXPECT_TRUE(mathf::NearEqual(mathf::TransformDirection(v, a),
-                                     Vector3(direction.x, direction.y,
+        EXPECT_TRUE(math::near_equal(math::transform_direction(v, a),
+                                     vector3(direction.x, direction.y,
                                              direction.z),
                                      1e-2f)) << n;
     }
 }
-#endif // MATHF_TEST_HAS_DXMATH
+#endif // MATHEMATICS_TEST_HAS_DXMATH

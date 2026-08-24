@@ -9,72 +9,72 @@
 
 #include "support/reg_testing.hpp"
 
-#include <mathf/mathf.hpp>
+#include <mathematics/mathematics.hpp>
 
 #include <cmath>
 #include <limits>
 
-using namespace mathf;
+using namespace math;
 
 namespace {
-constexpr float kEps = 1e-4f;
+constexpr float epsilon = 1e-4f;
 } // namespace
 
 // -------------------------------------------------- guide section 1: conventions
 // "합성 순서: 왼쪽에서 오른쪽, 적용 순서 그대로"
-TEST(Guide, CompositionReadsLeftToRight) {
-    const Matrix4x4 scale2 = ScalingMatrix(2.0f);
-    const Matrix4x4 move10 = TranslationMatrix(Vector3{10, 0, 0});
+TEST(guide, composition_reads_left_to_right) {
+    const matrix4x4 scale2 = scaling_matrix(2.0f);
+    const matrix4x4 move10 = translation_matrix(vector3{10, 0, 0});
 
     // Scale first, then translate: 1 -> 2 -> 12.
-    EXPECT_TRUE(NearEqual(TransformPoint(Vector3{1, 0, 0}, scale2 * move10),
-                          Vector3{12, 0, 0}, kEps));
+    EXPECT_TRUE(near_equal(transform_point(vector3{1, 0, 0}, scale2 * move10),
+                          vector3{12, 0, 0}, epsilon));
     // The other order scales the translation too: 1 -> 11 -> 22.
-    EXPECT_TRUE(NearEqual(TransformPoint(Vector3{1, 0, 0}, move10 * scale2),
-                          Vector3{22, 0, 0}, kEps));
+    EXPECT_TRUE(near_equal(transform_point(vector3{1, 0, 0}, move10 * scale2),
+                          vector3{22, 0, 0}, epsilon));
 }
 
 // "쿼터니언 곱 순서가 반대인 이유" -- the three identities the guide prints.
-TEST(Guide, TheThreeCompositionIdentities) {
-    const Quaternion a = QuaternionFromAxisAngle(Vector3{0, 0, 1}, 0.7f);
-    const Quaternion b = QuaternionFromAxisAngle(Vector3{1, 0, 0}, 0.4f);
-    const Vector3 v{1, 2, 3};
+TEST(guide, the_three_composition_identities) {
+    const quaternion a = quaternion_from_axis_angle(vector3{0, 0, 1}, 0.7f);
+    const quaternion b = quaternion_from_axis_angle(vector3{1, 0, 0}, 0.4f);
+    const vector3 v{1, 2, 3};
 
-    EXPECT_TRUE(NearEqual(Rotate(v, a * b), Rotate(Rotate(v, a), b), kEps));
-    EXPECT_TRUE(NearEqual(RotationMatrix(a * b),
-                          RotationMatrix(a) * RotationMatrix(b), kEps));
+    EXPECT_TRUE(near_equal(rotate(v, a * b), rotate(rotate(v, a), b), epsilon));
+    EXPECT_TRUE(near_equal(rotation_matrix(a * b),
+                          rotation_matrix(a) * rotation_matrix(b), epsilon));
 
-    const Matrix4x4 m1 = RotationMatrix(a);
-    const Matrix4x4 m2 = TranslationMatrix(Vector3{5, 0, 0});
-    const Vector4 v4{1, 2, 3, 1};
-    EXPECT_TRUE(NearEqual(v4 * (m1 * m2), (v4 * m1) * m2, 1e-3f));
+    const matrix4x4 m1 = rotation_matrix(a);
+    const matrix4x4 m2 = translation_matrix(vector3{5, 0, 0});
+    const vector4 v4{1, 2, 3, 1};
+    EXPECT_TRUE(near_equal(v4 * (m1 * m2), (v4 * m1) * m2, 1e-3f));
 }
 
 // "이동 성분: 3행" -- the row/column question, settled by a value.
-TEST(Guide, TranslationLivesInRowThree) {
-    const Matrix4x4 t = TranslationMatrix(Vector3{10, 20, 30});
+TEST(guide, translation_lives_in_row_three) {
+    const matrix4x4 t = translation_matrix(vector3{10, 20, 30});
     EXPECT_FLOAT_EQ(t.m[3][0], 10.0f);
     EXPECT_FLOAT_EQ(t.m[0][3], 0.0f) << "not column 3";
-    EXPECT_TRUE(NearEqual(t.Translation(), Vector3{10, 20, 30}, kEps));
+    EXPECT_TRUE(near_equal(t.translation(), vector3{10, 20, 30}, epsilon));
 }
 
 // ---------------------------------------------------- guide section 2: the example
 // The five-minute example, run end to end. If the guide's pipeline were
 // composed in the wrong order this would put the point somewhere else.
-TEST(Guide, TheFiveMinuteExampleRuns) {
-    const Quaternion spin =
-        QuaternionFromAxisAngle(Vector3{0, 1, 0}, Radians(30.0f));
-    const Matrix4x4 world =
-        Compose(Vector3{2, 2, 2}, spin, Vector3{10, 0, 5});
+TEST(guide, the_five_minute_example_runs) {
+    const quaternion spin =
+        quaternion_from_axis_angle(vector3{0, 1, 0}, radians(30.0f));
+    const matrix4x4 world =
+        compose(vector3{2, 2, 2}, spin, vector3{10, 0, 5});
 
-    const Matrix4x4 view = LookAtLH(Vector3{0, 5, -10}, Vector3{0, 0, 0},
-                                    Vector3{0, 1, 0});
-    const Matrix4x4 proj =
-        PerspectiveFovLH(Radians(60.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+    const matrix4x4 view = look_at_lh(vector3{0, 5, -10}, vector3{0, 0, 0},
+                                    vector3{0, 1, 0});
+    const matrix4x4 proj =
+        perspective_fov_lh(radians(60.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
-    const Matrix4x4 mvp = world * view * proj;
-    const Vector4 clip = Vector4{1, 0, 0, 1} * mvp;
-    const Vector3 ndc{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
+    const matrix4x4 mvp = world * view * proj;
+    const vector4 clip = vector4{1, 0, 0, 1} * mvp;
+    const vector3 ndc{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
 
     // The object sits in front of the camera, so it must land inside the clip
     // cube with a positive w.
@@ -83,169 +83,175 @@ TEST(Guide, TheFiveMinuteExampleRuns) {
     EXPECT_LE(ndc.z, 1.0f);
 
     // Composing by hand must agree with the chained product.
-    EXPECT_TRUE(NearEqual(Vector4{1, 0, 0, 1} * world * view * proj, clip,
+    EXPECT_TRUE(near_equal(vector4{1, 0, 0, 1} * world * view * proj, clip,
                           1e-3f));
 }
 
-TEST(Guide, PointAndDirectionDifferByTranslation) {
-    const Matrix4x4 world = Compose(
-        Vector3{2, 2, 2},
-        QuaternionFromAxisAngle(Vector3{0, 1, 0}, Radians(30.0f)),
-        Vector3{10, 0, 5});
+TEST(guide, point_and_direction_differ_by_translation) {
+    const matrix4x4 world = compose(
+        vector3{2, 2, 2},
+        quaternion_from_axis_angle(vector3{0, 1, 0}, radians(30.0f)),
+        vector3{10, 0, 5});
 
-    const Vector3 localPos{1, 0, 0};
-    EXPECT_FALSE(NearEqual(TransformPoint(localPos, world),
-                           TransformDirection(localPos, world), 1e-2f))
+    const vector3 local_pos{1, 0, 0};
+    EXPECT_FALSE(near_equal(transform_point(local_pos, world),
+                           transform_direction(local_pos, world), 1e-2f))
         << "if these agreed the translation would not be applied";
 
     // The guide's note on non-uniform scale: the inverse-transpose is what a
     // normal needs, and it differs from the plain matrix when scale is uneven.
-    const Matrix4x4 squashed =
-        Compose(Vector3{2, 1, 1}, Quaternion::Identity(), Vector3{0, 0, 0});
-    const Vector3 normal = Normalize(Vector3{1, 1, 0});
-    const Vector3 wrong = Normalize(TransformDirection(normal, squashed));
-    const Vector3 right =
-        Normalize(TransformDirection(normal, Transpose(Inverse(squashed))));
-    EXPECT_FALSE(NearEqual(wrong, right, 1e-2f))
+    const matrix4x4 squashed =
+        compose(vector3{2, 1, 1}, quaternion::identity(), vector3{0, 0, 0});
+    const vector3 normal = normalize(vector3{1, 1, 0});
+    const vector3 wrong = normalize(transform_direction(normal, squashed));
+    const vector3 right =
+        normalize(transform_direction(normal, transpose(inverse(squashed))));
+    EXPECT_FALSE(near_equal(wrong, right, 1e-2f))
         << "the guide claims these differ under non-uniform scale";
 }
 
 // ------------------------------------------- guide section 2: compile time
-constexpr Matrix4x4 kGuideProj = PerspectiveFovLH(kHalfPi, 1.0f, 1.0f, 100.0f);
-constexpr Quaternion kGuideTurn =
-    QuaternionFromAxisAngle(Vector3{0, 0, 1}, kHalfPi);
-constexpr float kGuideSin = Sin(0.5f);
-static_assert(Inverse(Matrix4x4::Identity()) == Matrix4x4::Identity());
-static_assert(kGuideSin > 0.47f && kGuideSin < 0.48f);
-static_assert(kGuideProj.m[2][3] == 1.0f);
-static_assert(kGuideTurn.z > 0.7f);
+constexpr matrix4x4 guide_projection = perspective_fov_lh(half_pi, 1.0f, 1.0f, 100.0f);
+constexpr quaternion guide_turn =
+    quaternion_from_axis_angle(vector3{0, 0, 1}, half_pi);
+constexpr float guide_sine = math::sin(0.5f);
+static_assert(inverse(matrix4x4::identity()) == matrix4x4::identity());
+static_assert(guide_sine > 0.47f && guide_sine < 0.48f);
+static_assert(guide_projection.m[2][3] == 1.0f);
+static_assert(guide_turn.z > 0.7f);
 
 // ------------------------------------------------------ guide section 3: types
-TEST(Guide, TheSizeTableIsCorrect) {
-    EXPECT_EQ(sizeof(Vector2), 8u);
-    EXPECT_EQ(sizeof(Vector3), 12u);
-    EXPECT_EQ(sizeof(Vector4), 16u);
-    EXPECT_EQ(sizeof(Quaternion), 16u);
-    EXPECT_EQ(sizeof(Matrix3x3), 36u);
-    EXPECT_EQ(sizeof(Matrix4x4), 64u);
-    EXPECT_EQ(sizeof(Plane), 16u);
-    EXPECT_EQ(sizeof(Sphere), 16u);
-    EXPECT_EQ(sizeof(AABB), 24u);
-    EXPECT_EQ(sizeof(Ray), 24u);
-    EXPECT_EQ(sizeof(VecReg), 16u);
+TEST(guide, the_size_table_is_correct) {
+    EXPECT_EQ(sizeof(vector2), 8u);
+    EXPECT_EQ(sizeof(vector3), 12u);
+    EXPECT_EQ(sizeof(vector4), 16u);
+    EXPECT_EQ(sizeof(quaternion), 16u);
+    EXPECT_EQ(sizeof(matrix3x3), 36u);
+    EXPECT_EQ(sizeof(matrix4x4), 64u);
+    EXPECT_EQ(sizeof(plane), 16u);
+    EXPECT_EQ(sizeof(sphere), 16u);
+    EXPECT_EQ(sizeof(aabb), 24u);
+    EXPECT_EQ(sizeof(ray), 24u);
+    EXPECT_EQ(sizeof(vec_reg), 16u);
 }
 
 // "AABB의 함정" -- the guide claims these two are DIFFERENT boxes.
-TEST(Guide, TheAabbTrapIsReal) {
-    const AABB a{Vector3{0, 0, 0}, Vector3{1, 1, 1}};
-    const AABB b = AABB::FromMinMax(Vector3{0, 0, 0}, Vector3{1, 1, 1});
-    EXPECT_FALSE(NearEqual(a, b, 1e-3f)) << "the guide's warning must be true";
+TEST(guide, the_aabb_trap_is_real) {
+    const aabb a{vector3{0, 0, 0}, vector3{1, 1, 1}};
+    const aabb b = aabb::from_min_max(vector3{0, 0, 0}, vector3{1, 1, 1});
+    EXPECT_FALSE(near_equal(a, b, 1e-3f)) << "the guide's warning must be true";
 
-    EXPECT_TRUE(NearEqual(a.Min(), Vector3{-1, -1, -1}, kEps));
-    EXPECT_TRUE(NearEqual(b.Min(), Vector3{0, 0, 0}, kEps));
+    EXPECT_TRUE(near_equal(a.min(), vector3{-1, -1, -1}, epsilon));
+    EXPECT_TRUE(near_equal(b.min(), vector3{0, 0, 0}, epsilon));
 }
 
 // ------------------------------------------- guide section 4: degenerate inputs
 // Every row of the guide's table, asserted.
-TEST(Guide, TheDegenerateInputTable) {
+TEST(guide, the_degenerate_input_table) {
     const float inf = std::numeric_limits<float>::infinity();
 
     // Extra parentheses: the preprocessor does not protect commas inside
     // BRACES, so a brace-init at the top level of a macro argument reads as
     // several arguments.
-    EXPECT_TRUE((Normalize(Vector3{0, 0, 0}) == Vector3{0, 0, 0}));
-    EXPECT_TRUE(std::isnan(Normalize(Vector3{inf, 0, 0}).x));
+    EXPECT_TRUE((normalize(vector3{0, 0, 0}) == vector3{0, 0, 0}));
+    EXPECT_TRUE(std::isnan(normalize(vector3{inf, 0, 0}).x));
 
-    const Matrix4x4 singular{1, 2, 3, 4, 2, 4, 6, 8, 9, 10, 11, 13, 14, 15, 17, 19};
-    EXPECT_TRUE(Inverse(singular) == Matrix4x4::Identity());
-    Matrix4x4 withInf = Matrix4x4::Identity();
-    withInf.m[0][0] = inf;
-    EXPECT_TRUE(Inverse(withInf) == Matrix4x4::Identity());
+    const matrix4x4 singular{1, 2, 3, 4, 2, 4, 6, 8, 9, 10, 11, 13, 14, 15, 17, 19};
+    EXPECT_TRUE(inverse(singular) == matrix4x4::identity());
+    matrix4x4 with_inf = matrix4x4::identity();
+    with_inf.m[0][0] = inf;
+    EXPECT_TRUE(inverse(with_inf) == matrix4x4::identity());
 
-    EXPECT_TRUE(Normalize(Quaternion{0, 0, 0, 0}) == Quaternion::Identity());
-    EXPECT_TRUE(QuaternionFromAxisAngle(Vector3{0, 0, 0}, 1.0f) ==
-                Quaternion::Identity());
+    EXPECT_TRUE(normalize(quaternion{0, 0, 0, 0}) == quaternion::identity());
+    EXPECT_TRUE(quaternion_from_axis_angle(vector3{0, 0, 0}, 1.0f) ==
+                quaternion::identity());
 
-    Vector3 scale, translation;
-    Quaternion rotation;
-    EXPECT_FALSE(Decompose(ScalingMatrix(Vector3{1, 0, 1}), scale, rotation,
+    vector3 scale, translation;
+    quaternion rotation;
+    EXPECT_FALSE(decompose(scaling_matrix(vector3{1, 0, 1}), scale, rotation,
                            translation));
 
-    EXPECT_TRUE(LookAtLH(Vector3{0, 0, 0}, Vector3{0, 5, 0}, Vector3{0, 1, 0}) ==
-                Matrix4x4::Identity());
+    EXPECT_TRUE(look_at_lh(vector3{0, 0, 0}, vector3{0, 5, 0}, vector3{0, 1, 0}) ==
+                matrix4x4::identity());
 
-    EXPECT_TRUE(PlaneFromPointNormal(Vector3{1, 2, 3}, Vector3{0, 0, 0}) ==
-                Plane{});
+    EXPECT_TRUE(plane_from_point_normal(vector3{1, 2, 3}, vector3{0, 0, 0}) ==
+                plane{});
 
-    EXPECT_TRUE(std::isnan(Sin(9.0e5f)));
-    EXPECT_FALSE(std::isnan(Sin(8.0e5f)));
+    const aabb empty;
+    EXPECT_TRUE(empty.is_empty());
+    EXPECT_FALSE(intersects(empty, vector3{}));
+    EXPECT_EQ(merge(empty, vector3{1, 2, 3}),
+              aabb(vector3{1, 2, 3}, vector3{}));
+
+    EXPECT_TRUE(std::isnan(math::sin(9.0e5f)));
+    EXPECT_FALSE(std::isnan(math::sin(8.0e5f)));
 }
 
 // ------------------------------------------------- guide section 5: geometry
 // "Contains는 비대칭이다"
-TEST(Guide, ContainsIsAsymmetricAsDocumented) {
-    const AABB box = AABB::FromMinMax(Vector3{-1, -1, -1}, Vector3{1, 1, 1});
-    const Sphere huge{Vector3{0, 0, 0}, 3.0f};
-    EXPECT_EQ(Contains(box, huge), Containment::Intersects);
-    EXPECT_EQ(Contains(huge, box), Containment::Contains);
+TEST(guide, contains_is_asymmetric_as_documented) {
+    const aabb box = aabb::from_min_max(vector3{-1, -1, -1}, vector3{1, 1, 1});
+    const sphere huge{vector3{0, 0, 0}, 3.0f};
+    EXPECT_EQ(contains(box, huge), containment::intersects);
+    EXPECT_EQ(contains(huge, box), containment::contains);
 }
 
 // "접촉은 교차로 센다"
-TEST(Guide, TouchingCountsAsIntersecting) {
-    EXPECT_TRUE(Intersects(Sphere{Vector3{0, 0, 0}, 1.0f},
-                           Sphere{Vector3{2, 0, 0}, 1.0f}));
+TEST(guide, touching_counts_as_intersecting) {
+    EXPECT_TRUE(intersects(sphere{vector3{0, 0, 0}, 1.0f},
+                           sphere{vector3{2, 0, 0}, 1.0f}));
 }
 
 // "레이는 반직선이다"
-TEST(Guide, RayIsAHalfLine) {
+TEST(guide, ray_is_a_half_line) {
     float distance = -1.0f;
-    EXPECT_FALSE(Raycast(Ray{Vector3{0, 0, 5}, Vector3{0, 0, 1}},
-                         Sphere{Vector3{0, 0, 0}, 1.0f}, distance));
-    ASSERT_TRUE(Raycast(Ray{Vector3{0, 0, 0}, Vector3{0, 0, 1}},
-                        Sphere{Vector3{0, 0, 0}, 1.0f}, distance));
-    EXPECT_NEAR(distance, 0.0f, kEps) << "inside means zero";
+    EXPECT_FALSE(raycast(ray{vector3{0, 0, 5}, vector3{0, 0, 1}},
+                         sphere{vector3{0, 0, 0}, 1.0f}, distance));
+    ASSERT_TRUE(raycast(ray{vector3{0, 0, 0}, vector3{0, 0, 1}},
+                        sphere{vector3{0, 0, 0}, 1.0f}, distance));
+    EXPECT_NEAR(distance, 0.0f, epsilon) << "inside means zero";
 }
 
 // ------------------------------------- guide section 7: the migration table
 // Spot checks on the rows a reader is most likely to trust blindly, each one a
-// place where DirectXMath and Mathf could plausibly have disagreed.
-TEST(Guide, MigrationTableRowsAreAccurate) {
+// place where DirectXMath and Mathematics could plausibly have disagreed.
+TEST(guide, migration_table_rows_are_accurate) {
     // "XMMatrixMultiply(a, b) -> a * b (순서 동일)"
-    const Matrix4x4 a = RotationZ(0.3f);
-    const Matrix4x4 b = TranslationMatrix(Vector3{1, 2, 3});
-    EXPECT_TRUE(NearEqual(TransformPoint(Vector3{1, 0, 0}, a * b),
-                          TransformPoint(TransformPoint(Vector3{1, 0, 0}, a), b),
-                          kEps));
+    const matrix4x4 a = rotation_z(0.3f);
+    const matrix4x4 b = translation_matrix(vector3{1, 2, 3});
+    EXPECT_TRUE(near_equal(transform_point(vector3{1, 0, 0}, a * b),
+                          transform_point(transform_point(vector3{1, 0, 0}, a), b),
+                          epsilon));
 
-    // "XMPlaneDotCoord -> SignedDistance"
-    const Plane p = PlaneFromPointNormal(Vector3{0, 0, 5}, Vector3{0, 0, 1});
-    EXPECT_NEAR(SignedDistance(p, Vector3{0, 0, 9}), 4.0f, kEps);
+    // "XMPlaneDotCoord -> signed_distance"
+    const plane p = plane_from_point_normal(vector3{0, 0, 5}, vector3{0, 0, 1});
+    EXPECT_NEAR(signed_distance(p, vector3{0, 0, 9}), 4.0f, epsilon);
 
-    // "XMVector3TransformCoord -> TransformPoint",
-    // "XMVector3TransformNormal -> TransformDirection"
-    const Matrix4x4 t = TranslationMatrix(Vector3{10, 0, 0});
-    EXPECT_TRUE(NearEqual(TransformPoint(Vector3{1, 0, 0}, t), Vector3{11, 0, 0},
-                          kEps));
-    EXPECT_TRUE(NearEqual(TransformDirection(Vector3{1, 0, 0}, t),
-                          Vector3{1, 0, 0}, kEps));
+    // "XMVector3TransformCoord -> transform_point",
+    // "XMVector3TransformNormal -> transform_direction"
+    const matrix4x4 t = translation_matrix(vector3{10, 0, 0});
+    EXPECT_TRUE(near_equal(transform_point(vector3{1, 0, 0}, t), vector3{11, 0, 0},
+                          epsilon));
+    EXPECT_TRUE(near_equal(transform_direction(vector3{1, 0, 0}, t),
+                          vector3{1, 0, 0}, epsilon));
 
-    // "XMMatrixAffineTransformation -> Compose(scale, rot, translation)"
-    EXPECT_TRUE(NearEqual(
-        Compose(Vector3{2, 2, 2}, Quaternion::Identity(), Vector3{1, 0, 0}),
-        ScalingMatrix(2.0f) * TranslationMatrix(Vector3{1, 0, 0}), kEps));
+    // "XMMatrixAffineTransformation -> compose(scale, rot, translation)"
+    EXPECT_TRUE(near_equal(
+        compose(vector3{2, 2, 2}, quaternion::identity(), vector3{1, 0, 0}),
+        scaling_matrix(2.0f) * translation_matrix(vector3{1, 0, 0}), epsilon));
 
-    // "PlaneIntersectionType -> PlaneSide (INTERSECTING -> Straddling)"
-    EXPECT_EQ(Classify(Sphere{Vector3{0, 0, 0}, 1.0f}, Plane{0, 0, 1, 0}),
-              PlaneSide::Straddling);
+    // "PlaneIntersectionType -> plane_side (INTERSECTING -> straddling)"
+    EXPECT_EQ(classify(sphere{vector3{0, 0, 0}, 1.0f}, plane{0, 0, 1, 0}),
+              plane_side::straddling);
 }
 
 // "Est 이외의 근사 없음" -- the exact form and the estimate must actually
 // differ, or the guide is promising a trade that does not exist.
-TEST(Guide, EstimateFormsTradeAccuracyForSpeed) {
-    const Vector3 v{3, 4, 12};
-    const Vector3 exact = Normalize(v);
-    const Vector3 estimate = NormalizeEst(v);
-    EXPECT_TRUE(NearEqual(exact, estimate, 1e-2f)) << "still close";
-    EXPECT_NEAR(Length(exact), 1.0f, 1e-6f);
-    EXPECT_NEAR(Length(estimate), 1.0f, 1e-2f);
+TEST(guide, estimate_forms_trade_accuracy_for_speed) {
+    const vector3 v{3, 4, 12};
+    const vector3 exact = normalize(v);
+    const vector3 estimate = normalize_est(v);
+    EXPECT_TRUE(near_equal(exact, estimate, 1e-2f)) << "still close";
+    EXPECT_NEAR(length(exact), 1.0f, 1e-6f);
+    EXPECT_NEAR(length(estimate), 1.0f, 1e-2f);
 }

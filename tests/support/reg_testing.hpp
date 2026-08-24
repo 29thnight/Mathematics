@@ -10,10 +10,10 @@
 // (2) is the strongest of the three and is new in Phase 1: consteval_ops is
 // compiled into every build regardless of backend, so the oracle lives in the
 // same binary as the code under test rather than in a separate scalar build.
-#ifndef MATHF_TESTS_REG_TESTING_HPP
-#define MATHF_TESTS_REG_TESTING_HPP
+#ifndef MATHEMATICS_TESTS_REG_TESTING_HPP
+#define MATHEMATICS_TESTS_REG_TESTING_HPP
 
-#include <mathf/vec_reg.hpp>
+#include <mathematics/vec_reg.hpp>
 
 #include <gtest/gtest.h>
 
@@ -24,27 +24,27 @@
 #include <random>
 #include <string>
 
-namespace mathf_test {
+namespace math_test {
 
-using mathf::VecReg;
+using math::vec_reg;
 
 // ------------------------------------------------------------------- inspection
-inline std::array<float, 4> ToArray(VecReg v) {
-    return {mathf::Lane(v, 0), mathf::Lane(v, 1),
-            mathf::Lane(v, 2), mathf::Lane(v, 3)};
+inline std::array<float, 4> to_array(vec_reg v) {
+    return {math::lane(v, 0), math::lane(v, 1),
+            math::lane(v, 2), math::lane(v, 3)};
 }
 
-inline std::array<std::uint32_t, 4> ToBits(VecReg v) {
-    return {mathf::LaneBits(v, 0), mathf::LaneBits(v, 1),
-            mathf::LaneBits(v, 2), mathf::LaneBits(v, 3)};
+inline std::array<std::uint32_t, 4> to_bits(vec_reg v) {
+    return {math::lane_bits(v, 0), math::lane_bits(v, 1),
+            math::lane_bits(v, 2), math::lane_bits(v, 3)};
 }
 
 // Bit comparison, not value comparison. Masks are all-ones lanes, which read as
 // NaN and therefore never compare equal to themselves; -0.0f and +0.0f are the
 // opposite problem, comparing equal while being different results.
-inline ::testing::AssertionResult BitsEqual(VecReg actual, VecReg expected) {
-    const auto a = ToBits(actual);
-    const auto e = ToBits(expected);
+inline ::testing::AssertionResult bits_equal(vec_reg actual, vec_reg expected) {
+    const auto a = to_bits(actual);
+    const auto e = to_bits(expected);
     if (a == e) return ::testing::AssertionSuccess();
 
     ::testing::Message msg;
@@ -57,11 +57,11 @@ inline ::testing::AssertionResult BitsEqual(VecReg actual, VecReg expected) {
 
 // Every lane within tolerance. Used where a fused or reassociated SIMD result may
 // legitimately differ from the scalar reference in the last places.
-inline ::testing::AssertionResult NearEqual(VecReg actual, VecReg expected,
-                                            float relTol = 1e-5f,
-                                            float absTol = 1e-6f) {
-    const auto a = ToArray(actual);
-    const auto e = ToArray(expected);
+inline ::testing::AssertionResult near_equal(vec_reg actual, vec_reg expected,
+                                            float rel_tol = 1e-5f,
+                                            float abs_tol = 1e-6f) {
+    const auto a = to_array(actual);
+    const auto e = to_array(expected);
     for (int i = 0; i < 4; ++i) {
         if (std::isnan(a[i]) && std::isnan(e[i])) continue;
         // Infinities have to match exactly, sign included: subtracting them
@@ -71,7 +71,7 @@ inline ::testing::AssertionResult NearEqual(VecReg actual, VecReg expected,
             return ::testing::AssertionFailure()
                    << "lane " << i << ": actual " << a[i] << ", expected " << e[i];
         }
-        const float tol = std::max(absTol, std::abs(e[i]) * relTol);
+        const float tol = std::max(abs_tol, std::abs(e[i]) * rel_tol);
         if (!(std::abs(a[i] - e[i]) <= tol)) {
             return ::testing::AssertionFailure()
                    << "lane " << i << ": actual " << a[i] << ", expected " << e[i]
@@ -81,24 +81,24 @@ inline ::testing::AssertionResult NearEqual(VecReg actual, VecReg expected,
     return ::testing::AssertionSuccess();
 }
 
-// Distance in representable floats. The right unit for "are these the same
+// distance in representable floats. The right unit for "are these the same
 // answer computed two ways": an absolute epsilon means different things at
 // different magnitudes, and exact equality is too strong wherever one of the two
 // paths is allowed to contract a multiply-add into an FMA and the other is not.
-inline std::int64_t UlpDiff(float a, float b) {
+inline std::int64_t ulp_diff(float a, float b) {
     if (a == b) return 0;
     if (std::isnan(a) || std::isnan(b)) return INT64_MAX;
 
     // Map the float ordering onto a monotonic integer ordering: negatives are
     // stored sign-magnitude, so they have to be reflected around zero.
-    auto Ordered = [](float x) -> std::int64_t {
+    auto ordered = [](float x) -> std::int64_t {
         std::uint32_t bits = 0;
         std::memcpy(&bits, &x, sizeof bits);
         return (bits & 0x80000000u)
                    ? -static_cast<std::int64_t>(bits & 0x7FFFFFFFu)
                    : static_cast<std::int64_t>(bits);
     };
-    const std::int64_t d = Ordered(a) - Ordered(b);
+    const std::int64_t d = ordered(a) - ordered(b);
     return d < 0 ? -d : d;
 }
 
@@ -112,11 +112,11 @@ inline std::int64_t UlpDiff(float a, float b) {
 // value passes if it is close on EITHER scale: within a few ULP, or within a few
 // ULP of one, which is the floor that matters for anything living in [-1, 1].
 inline ::testing::AssertionResult
-SameToWithin(float actual, float expected, std::int64_t maxUlp = 4,
-             float absFloor = 2e-7f) {
-    const std::int64_t ulp = UlpDiff(actual, expected);
+same_to_within(float actual, float expected, std::int64_t max_ulp = 4,
+             float abs_floor = 2e-7f) {
+    const std::int64_t ulp = ulp_diff(actual, expected);
     const float diff = std::abs(actual - expected);
-    if (ulp <= maxUlp || diff <= absFloor) return ::testing::AssertionSuccess();
+    if (ulp <= max_ulp || diff <= abs_floor) return ::testing::AssertionSuccess();
     return ::testing::AssertionFailure()
            << "actual " << actual << ", expected " << expected << " ("
            << ulp << " ulp, abs " << diff << ")";
@@ -128,7 +128,7 @@ SameToWithin(float actual, float expected, std::int64_t maxUlp = 4,
 // while the result is tiny, so any relative-to-the-result tolerance is wrong by
 // construction. This returns the absolute bound for an n-term dot product:
 // roughly n * epsilon * sum|a_i * b_i|, with margin.
-inline float DotTolerance(const std::array<float, 4>& a,
+inline float dot_tolerance(const std::array<float, 4>& a,
                           const std::array<float, 4>& b, int count) {
     float terms = 0.0f;
     for (int i = 0; i < count; ++i) terms += std::abs(a[i] * b[i]);
@@ -140,37 +140,37 @@ inline float DotTolerance(const std::array<float, 4>& a,
 // through. Without it the reference is not trustworthy under fast-math: the
 // compiler may re-derive an input from the expression that produced it, skipping
 // a rounding the SIMD path already took (docs/PLAN.md Phase 0 notes).
-inline float Opaque(float x) {
+inline float opaque(float x) {
     volatile float v = x;
     return v;
 }
 
 // A random input in both forms, holding identical bits: `f` for hand-written
 // expectations, `v` for the code under test.
-struct Sample {
+struct sample {
     std::array<float, 4> f;
-    VecReg v;
+    vec_reg v;
 };
 
 // Deterministic: a failure reported by CI must reproduce locally.
-class RandomVectors {
+class random_vectors {
 public:
-    explicit RandomVectors(unsigned seed) : rng_(seed), dist_(-100.0f, 100.0f) {}
+    explicit random_vectors(unsigned seed) : rng_(seed), dist_(-100.0f, 100.0f) {}
 
-    Sample Next() {
+    sample next() {
         // Filled in a loop rather than as call arguments: argument evaluation
         // order is unspecified, so building the vector inline would let two
         // compilers draw from the generator in different orders.
         std::array<float, 4> f{};
-        for (auto& x : f) x = Opaque(dist_(rng_));
-        return Sample{f, mathf::Set(f[0], f[1], f[2], f[3])};
+        for (auto& x : f) x = opaque(dist_(rng_));
+        return sample{f, math::set(f[0], f[1], f[2], f[3])};
     }
 
     // Strictly positive, for square roots and reciprocals.
-    Sample NextPositive() {
+    sample next_positive() {
         std::array<float, 4> f{};
-        for (auto& x : f) x = Opaque(std::abs(dist_(rng_)) + 0.5f);
-        return Sample{f, mathf::Set(f[0], f[1], f[2], f[3])};
+        for (auto& x : f) x = opaque(std::abs(dist_(rng_)) + 0.5f);
+        return sample{f, math::set(f[0], f[1], f[2], f[3])};
     }
 
 private:
@@ -178,13 +178,13 @@ private:
     std::uniform_real_distribution<float> dist_;
 };
 
-inline constexpr unsigned kSeed = 0x4D617468u;   // 'Math'
-inline constexpr int kSamples = 256;
+inline constexpr unsigned random_seed = 0x4D617468u;   // 'Math'
+inline constexpr int sample_count = 256;
 
 // Values that break naive implementations: signed zeros, infinities, denormals,
 // and the extremes of the range. NaN is deliberately excluded -- operations whose
 // NaN behaviour is target-specific are tested separately and explicitly.
-inline const std::array<float, 12>& EdgeValues() {
+inline const std::array<float, 12>& edge_values() {
     static const std::array<float, 12> values = {
         0.0f, -0.0f, 1.0f, -1.0f,
         std::numeric_limits<float>::infinity(),
@@ -198,8 +198,8 @@ inline const std::array<float, 12>& EdgeValues() {
     return values;
 }
 
-inline float QuietNaN() { return std::numeric_limits<float>::quiet_NaN(); }
+inline float quiet_nan() { return std::numeric_limits<float>::quiet_NaN(); }
 
-} // namespace mathf_test
+} // namespace math_test
 
-#endif // MATHF_TESTS_REG_TESTING_HPP
+#endif // MATHEMATICS_TESTS_REG_TESTING_HPP
