@@ -28,6 +28,10 @@ jobs:
             preset: clang-release
           - name: Scalar fallback
             preset: scalar-release
+          # Compiles the paths every other leg optimizes away: dot products
+          # without dpps, Select without blendv, multiply-add without FMA.
+          - name: SSE2 baseline
+            preset: sse2-release
     steps:
       - uses: actions/checkout@v4
 
