@@ -56,6 +56,22 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
 
+      # Structure, not time. The timing gate below cannot see this: the family
+      # it guards moves 2x with .text alignment (docs/BASELINE.md 8), while
+      # whether a fixed-extent loop was expanded survives a relink.
+      - name: Codegen gate (fixed-extent shapes stay loop-free)
+        if: matrix.preset == 'msvc-release'
+        shell: pwsh
+        run: ./scripts/check_codegen.ps1 -OutputDirectory $env:RUNNER_TEMP
+
+      - name: Upload codegen listing
+        if: always() && matrix.preset == 'msvc-release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mathematics-codegen-listing
+          path: ${{ runner.temp }}\mathematics-codegen-probes.asm
+          if-no-files-found: warn
+
       - name: Repaired regression performance gate
         if: matrix.preset == 'msvc-release' || matrix.preset == 'clang-release'
         shell: pwsh
