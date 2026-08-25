@@ -54,6 +54,10 @@ if(MATHEMATICS_ENABLE_COVERAGE)
     target_compile_options(mathematics_tests PRIVATE
         --coverage -fprofile-abs-path -fkeep-inline-functions -O0 -g
         -U__STDCPP_FLOAT16_T__ -U__STDCPP_BFLOAT16_T__)
+    # Turns MATHEMATICS_INLINE back into the plain keyword; see config.hpp for
+    # why always_inline and -fkeep-inline-functions together make a function's
+    # signature line permanently uncoverable.
+    target_compile_definitions(mathematics_tests PRIVATE MATHEMATICS_COVERAGE_BUILD)
     target_link_options(mathematics_tests PRIVATE --coverage)
 endif()
 

@@ -79,6 +79,20 @@
 #  define MATHEMATICS_NOINLINE
 #endif
 
+// The coverage build asks for the plain keyword instead. Forcing the inline
+// there costs a line of coverage per function and can never earn it back: gcov
+// attributes the standalone body that -fkeep-inline-functions emits to the
+// signature line, nothing ever calls that copy, and the inlined copies at the
+// call sites are counted against the body lines instead. Every API function
+// here is MATHEMATICS_INLINE, so that was 322 of the 610 uncovered lines -- 13%
+// of the measured total, and no test could have reached one of them. Inlining
+// is a speed decision; the coverage build is not measuring speed. NOINLINE is
+// left alone: it only ever helps attribution.
+#ifdef MATHEMATICS_COVERAGE_BUILD
+#  undef MATHEMATICS_INLINE
+#  define MATHEMATICS_INLINE inline
+#endif
+
 // __vectorcall keeps vec_reg in xmm registers across non-inlined boundaries,
 // matching DirectXMath's XM_CALLCONV. On SysV the default ABI already does this.
 //
