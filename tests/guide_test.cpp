@@ -281,3 +281,35 @@ TEST(guide, estimate_forms_trade_accuracy_for_speed) {
     EXPECT_NEAR(length(exact), 1.0f, 1e-6f);
     EXPECT_NEAR(length(estimate), 1.0f, 1e-2f);
 }
+
+// -------------------------------------- guide section: C++20 range view
+// "두 view는 튜플 프로토콜도 만족하므로 루프 없이 이름으로 받을 수 있다."
+// "바인딩은 원본을 참조하므로 쓰기가 그대로 관통하고, 상수평가에서도 동작한다."
+TEST(guide, structured_bindings_name_components_and_rows) {
+    vector4 color{1, 0.5f, 0.25f, 1};
+    auto&& [x, y, z, w] = math::components(color);
+    EXPECT_FLOAT_EQ(x, 1.0f);
+    EXPECT_FLOAT_EQ(y, 0.5f);
+
+    z = 0.75f;
+    EXPECT_FLOAT_EQ(color.z, 0.75f);
+    EXPECT_FLOAT_EQ(w, 1.0f);
+
+    matrix4x4 world = matrix4x4::identity();
+    auto&& [row0, row1, row2, row3] = math::rows(world);
+    static_assert(decltype(row0)::extent == 4);
+    row3[0] = 5.0f;
+    EXPECT_FLOAT_EQ(world.m[3][0], 5.0f);
+    EXPECT_FLOAT_EQ(row1[1], 1.0f);
+    EXPECT_FLOAT_EQ(row2[2], 1.0f);
+}
+
+// "일반 코드에서는 math::ranges::get<I>(view)를 쓴다."
+TEST(guide, free_get_is_the_generic_spelling) {
+    vector3 value{1, 2, 3};
+    auto view = math::components(value);
+    EXPECT_FLOAT_EQ(math::ranges::get<1>(view), 2.0f);
+
+    math::ranges::get<0>(view) = -1.0f;
+    EXPECT_EQ(value, vector3(-1, 2, 3));
+}

@@ -230,8 +230,26 @@ math::components(color) |
 타임에 전개한다. 함수 호출 형태인 `fold_fixed(range, initial, operation)`도 그대로
 지원한다. 파이프 closure 자체는 어셈블리에서 직접 호출과 동일하게 제거된다.
 
-range-for는 정상적인 iterator 루프이므로 MSVC에서 자동 전개가 보장되지는 않는다.
-또한 callback 호출 순서와 부작용을 보존해야 하므로 fixed terminal도 항상 SIMD가 되는
+두 view는 튜플 프로토콜도 만족하므로 루프 없이 이름으로 받을 수 있다.
+
+```cpp
+auto&& [x, y, z, w] = math::components(color);
+auto&& [row0, row1, row2, row3] = math::rows(world);
+```
+
+바인딩은 원본을 참조하므로 쓰기가 그대로 관통하고, 상수평가에서도 동작한다. C++23의
+`tuple-like` 개념은 표준 튜플 타입만 인정하므로 `std::apply`에는 넣을 수 없다 —
+일반 코드에서는 `math::ranges::get<I>(view)`를 쓴다.
+
+**뜨거운 루프 안에서는 range-for를 피하고 `fold_fixed` 계열을 쓴다.** MSVC는 다른
+루프 안에 중첩된 반복자 구동 루프를 전개하지 않는다. 이는 `std::views`의 문제가
+아니라 반복자 루프 일반의 문제여서 `std::span`이나 생 포인터로 바꿔도 같다. 남은
+내부 루프는 바깥 루프의 전개까지 막으므로, 배열을 도는 형태에서 성분 합은 40%,
+행 합은 64% 느려진다([BASELINE §9](BASELINE.md)). `fold_fixed`는 같은 자리에서 손으로
+쓴 코드와 명령어까지 같다. 단일 객체를 한 번 훑는 자리라면 range-for도 전개되므로
+차이가 없다. clang은 어느 형태에서도 차이가 없다.
+
+callback 호출 순서와 부작용을 보존해야 하므로 fixed terminal도 항상 SIMD가 되는
 것은 아니다. SIMD가 중요한 전용 산술은 기존 벡터 연산을 우선한다.
 
 C++23 표준 라이브러리에 `std::mdspan`이 있으면 `<mathematics/mdspan.hpp>`가 고정
