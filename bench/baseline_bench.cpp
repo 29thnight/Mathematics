@@ -74,6 +74,110 @@ const std::vector<float4>& data() {
     return data;
 }
 
+// =========================================================== page-pinned arenas
+// Every throughput benchmark reads a shared input stream and writes an output
+// buffer, and left to the allocator the low twelve bits of those two addresses
+// are whatever that process, that binary and that --benchmark_filter happened
+// to produce. When a store's low twelve bits match an upcoming load's, the load
+// is falsely held back behind the store -- 4K aliasing -- so that accident
+// lands straight on the measurement.
+//
+// Phase 4 hit it in the inverse benchmark: one binary measured 47, 54 and
+// 74 M/s in three processes, each internally consistent. A probe with a
+// controlled offset pinned the cause -- 48.6 M/s at 64 bytes of separation,
+// 58.1 at 16, a flat 79 from 128 up -- and inverse moved into an arena that
+// fixes the separation at half a page. docs/BASELINE.md 5(1) records it. No
+// other stream benchmark was moved.
+//
+// The quaternion product then paid the bill. Its instruction stream was byte
+// for byte identical to the recorded baseline's, and relinking the same object
+// file still swung the Mathematics-to-DirectXMath ratio across twenty-nine
+// points -- far enough to park it on either side of the +-5% gate. Restricting
+// --benchmark_filter moved it too, because that changes which output vectors
+// get allocated and therefore where they land. So every throughput family now
+// owns one of these arenas, and -- the part that makes an A/B comparison mean
+// anything -- Mathematics's benchmark and each baseline's read and write the
+// SAME addresses rather than two independently allocated buffers.
+constexpr std::size_t page_bytes = 4096;
+
+// Where a region starts relative to the page boundary that follows the previous
+// one. Page-aligning all of them instead would put every pair at a relative
+// offset of zero, which is the worst case rather than a neutral one.
+//
+// 1024 rather than the half page the inverse arena used, because several of
+// these benchmarks read two halves of ONE input region -- d[i] against
+// d[i + count/2] -- and the second half starts at whatever the half-size is
+// modulo a page. The quaternion stream is exactly one page, so its second half
+// sits at page offset 2048 and a half-page output stagger would have landed the
+// stores on precisely the same offset as those loads: the collision the arena
+// exists to prevent, rebuilt by hand. At 1024 the output clears both halves of
+// every stream here -- quaternion (half page offset 2048), matrix4x4 (8192, so
+// zero) and the packed vector3 streams (3072) -- by at least 1024 bytes, well
+// inside the flat region the probe measured.
+constexpr std::size_t region_stagger[4] = {0, 1024, 2048, 3072};
+
+// A null source reserves an output region; anything else is copied in.
+struct arena_region {
+    const void* source;
+    std::size_t bytes;
+};
+
+template <std::size_t region_count>
+class stream_arena {
+    static_assert(region_count >= 1 && region_count <= 4,
+                  "region_stagger covers four regions");
+
+public:
+    explicit stream_arena(const std::array<arena_region, region_count>& regions) {
+        std::size_t total = 0;
+        for (const arena_region& region : regions) total += region.bytes;
+        // A region can spend a page rounding up and 3 KiB more on stagger.
+        storage_.resize(total + 2 * (region_count + 1) * page_bytes);
+
+        std::uintptr_t cursor =
+            page_up(reinterpret_cast<std::uintptr_t>(storage_.data()));
+        for (std::size_t i = 0; i < region_count; ++i) {
+            auto* const base =
+                reinterpret_cast<unsigned char*>(cursor + region_stagger[i]);
+            bases_[i] = base;
+            // Filling the bytes is also what implicitly creates the objects the
+            // benchmarks then read and write through as().
+            if (regions[i].source != nullptr) {
+                std::memcpy(base, regions[i].source, regions[i].bytes);
+            } else {
+                std::memset(base, 0, regions[i].bytes);
+            }
+            cursor = page_up(reinterpret_cast<std::uintptr_t>(base) +
+                             regions[i].bytes);
+        }
+    }
+
+    // The bases point into storage_, so an arena that moved would keep working
+    // only by accident. Every one of these is a function-local static built in
+    // place; nothing needs to copy one.
+    stream_arena(const stream_arena&) = delete;
+    stream_arena& operator=(const stream_arena&) = delete;
+
+    template <class element>
+    element* as(std::size_t index) const noexcept {
+        return reinterpret_cast<element*>(bases_[index]);
+    }
+
+private:
+    static std::uintptr_t page_up(std::uintptr_t address) noexcept {
+        return (address + page_bytes - 1) & ~std::uintptr_t{page_bytes - 1};
+    }
+
+    std::vector<unsigned char> storage_;
+    std::array<unsigned char*, region_count> bases_{};
+};
+
+template <class... region_specs>
+stream_arena<sizeof...(region_specs)> make_arena(region_specs... specs) {
+    return stream_arena<sizeof...(region_specs)>(
+        std::array<arena_region, sizeof...(region_specs)>{specs...});
+}
+
 } // namespace
 
 // ============================================================== latency: mul_add
@@ -485,18 +589,39 @@ const std::vector<math::vector3>& vector3_data() {
     return data;
 }
 
+// Both Mathematics paths and both baselines stream through these two regions,
+// so the four are measured at one fixed input-to-output offset.
+stream_arena<2>& normalize_arena() {
+    static auto instance = make_arena(
+        arena_region{vector3_data().data(),
+                     vector3_batch_size * sizeof(math::vector3)},
+        arena_region{nullptr, vector3_batch_size * sizeof(math::vector3)});
+    return instance;
+}
+
+#if MATHEMATICS_BENCH_HAS_DXMATH
+static_assert(sizeof(DirectX::XMFLOAT3) == sizeof(math::vector3),
+              "the baselines share the family's input and output regions");
+#endif
+#if MATHEMATICS_BENCH_HAS_GLM
+static_assert(sizeof(glm::vec3) == sizeof(math::vector3),
+              "the baselines share the family's input and output regions");
+#endif
+
 } // namespace
 
 static void bm_mathematics_vector3_normalize_throughput(benchmark::State& state) {
-    const auto& in = vector3_data();
-    std::vector<math::vector3> out(vector3_batch_size);
+    const auto& arena = normalize_arena();
+    const auto* in = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::vector3>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < vector3_batch_size; ++i) {
-            out[static_cast<size_t>(i)] = math::normalize(in[static_cast<size_t>(i)]);
+            out[i] = math::normalize(in[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * vector3_batch_size);
@@ -505,15 +630,15 @@ BENCHMARK(bm_mathematics_vector3_normalize_throughput);
 
 static void bm_mathematics_vector3_normalize_unchecked_throughput(
     benchmark::State& state) {
-    const auto& in = vector3_data();
-    std::vector<math::vector3> out(vector3_batch_size);
+    const auto& arena = normalize_arena();
+    const auto* in = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::vector3>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < vector3_batch_size; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::normalize_unchecked(in[static_cast<size_t>(i)]);
+            out[i] = math::normalize_unchecked(in[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * vector3_batch_size);
@@ -522,19 +647,18 @@ BENCHMARK(bm_mathematics_vector3_normalize_unchecked_throughput);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_vector3_normalize_throughput(benchmark::State& state) {
-    const auto& in = vector3_data();
-    std::vector<DirectX::XMFLOAT3> out(vector3_batch_size);
+    const auto& arena = normalize_arena();
+    const auto* in = arena.as<const DirectX::XMFLOAT3>(0);
+    auto* out = arena.as<DirectX::XMFLOAT3>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < vector3_batch_size; ++i) {
-            const auto* q =
-                reinterpret_cast<const DirectX::XMFLOAT3*>(&in[static_cast<size_t>(i)].x);
             DirectX::XMStoreFloat3(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(q)));
+                &out[i], DirectX::XMVector3Normalize(DirectX::XMLoadFloat3(&in[i])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * vector3_batch_size);
@@ -544,17 +668,17 @@ BENCHMARK(bm_dx_math_vector3_normalize_throughput);
 
 #if MATHEMATICS_BENCH_HAS_GLM
 static void bm_glm_vector3_normalize_throughput(benchmark::State& state) {
-    const auto& in = vector3_data();
-    std::vector<glm::vec3> out(vector3_batch_size);
+    const auto& arena = normalize_arena();
+    const auto* in = arena.as<const glm::vec3>(0);
+    auto* out = arena.as<glm::vec3>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < vector3_batch_size; ++i) {
-            const auto& v = *reinterpret_cast<const glm::vec3*>(
-                &in[static_cast<size_t>(i)].x);
-            out[static_cast<size_t>(i)] = glm::normalize(v);
+            out[i] = glm::normalize(in[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * vector3_batch_size);
@@ -592,46 +716,49 @@ const std::vector<math::matrix4x4>& matrix_data() {
     return data;
 }
 
-// The inverse benchmarks read their input and write their output through this
-// arena, which pins the two arrays' RELATIVE page offset instead of leaving it
-// to the allocator.
-//
-// It exists because the inverse numbers would not reproduce: the same binary
-// measured 47, 54 and 74 M/s in different processes, each internally
-// consistent. The cause is 4K aliasing -- when a store's low twelve address
-// bits match an upcoming load's, the load is falsely held back behind the
-// store -- and whether the input and output vectors collided that way was
-// decided by ASLR, differently every process. A probe with a controlled
-// offset pinned it: 48.6 M/s at a relative offset of 64 bytes (each store
-// aliasing the very next iteration's load), 58 at 16, a flat 79 from 128 up.
-// Phase 3 documented the irreproducibility as an open confusion; this was it.
-// Half a page of separation parks every library's run in the flat region, so
-// the comparison measures the arithmetic and not the allocator's mood.
-struct inverse_arena {
-    std::vector<unsigned char> storage;
-    unsigned char* in;
-    unsigned char* out;
+// Each matrix family gets an arena; the note on stream_arena above says why an
+// independently allocated output vector is not a neutral choice. Inverse was
+// the first benchmark here to need one, and is the reason that note exists.
+constexpr std::size_t matrix_stream_bytes =
+    matrix_batch_size * sizeof(math::matrix4x4);
 
-    inverse_arena()
-        : storage(2 * matrix_batch_size * sizeof(math::matrix4x4) + 3 * 4096) {
-        const auto base = reinterpret_cast<std::uintptr_t>(storage.data());
-        const std::uintptr_t page = (base + 4095u) & ~std::uintptr_t{4095u};
-        in = reinterpret_cast<unsigned char*>(page);
-        const std::uintptr_t after_in =
-            (page + matrix_batch_size * sizeof(math::matrix4x4) + 4095u) &
-            ~std::uintptr_t{4095u};
-        out = reinterpret_cast<unsigned char*>(after_in + 2048u);
-
-        std::memcpy(in, matrix_data().data(),
-                    matrix_batch_size * sizeof(math::matrix4x4));
-    }
-};
-
-inverse_arena& get_inverse_arena() {
-    static inverse_arena arena_instance;
-    return arena_instance;
+stream_arena<2>& matrix_multiply_arena() {
+    static auto instance = make_arena(
+        arena_region{matrix_data().data(), matrix_stream_bytes},
+        arena_region{nullptr, matrix_stream_bytes / 2});
+    return instance;
 }
 
+stream_arena<2>& matrix_inverse_arena() {
+    static auto instance = make_arena(
+        arena_region{matrix_data().data(), matrix_stream_bytes},
+        arena_region{nullptr, matrix_stream_bytes});
+    return instance;
+}
+
+stream_arena<2>& matrix_transpose_arena() {
+    static auto instance = make_arena(
+        arena_region{matrix_data().data(), matrix_stream_bytes},
+        arena_region{nullptr, matrix_stream_bytes});
+    return instance;
+}
+
+stream_arena<2>& decompose_arena() {
+    static auto instance = make_arena(
+        arena_region{matrix_data().data(), matrix_stream_bytes},
+        arena_region{nullptr,
+                     matrix_batch_size * sizeof(math::decomposed_transform)});
+    return instance;
+}
+
+#if MATHEMATICS_BENCH_HAS_DXMATH
+static_assert(sizeof(DirectX::XMFLOAT4X4) == sizeof(math::matrix4x4),
+              "the baselines share the family's input and output regions");
+#endif
+#if MATHEMATICS_BENCH_HAS_GLM
+static_assert(sizeof(glm::mat4) == sizeof(math::matrix4x4),
+              "the baselines share the family's input and output regions");
+#endif
 
 } // namespace
 
@@ -661,16 +788,17 @@ BENCHMARK(bm_dx_math_matrix4x4_multiply_latency);
 #endif
 
 static void bm_mathematics_matrix4x4_multiply_throughput(benchmark::State& state) {
-    const auto& d = matrix_data();
-    std::vector<math::matrix4x4> out(matrix_batch_size / 2);
+    const auto& arena = matrix_multiply_arena();
+    const auto* d = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size / 2; ++i) {
-            out[static_cast<size_t>(i)] =
-                d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + matrix_batch_size / 2)];
+            out[i] = d[i] * d[i + matrix_batch_size / 2];
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (matrix_batch_size / 2));
@@ -679,22 +807,21 @@ BENCHMARK(bm_mathematics_matrix4x4_multiply_throughput);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_matrix4x4_multiply_throughput(benchmark::State& state) {
-    const auto& d = matrix_data();
-    std::vector<DirectX::XMFLOAT4X4> out(matrix_batch_size / 2);
+    const auto& arena = matrix_multiply_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4X4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4X4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size / 2; ++i) {
-            const auto* qa = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
-                &d[static_cast<size_t>(i)].m[0][0]);
-            const auto* qb = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
-                &d[static_cast<size_t>(i + matrix_batch_size / 2)].m[0][0]);
             DirectX::XMStoreFloat4x4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(qa),
-                                          DirectX::XMLoadFloat4x4(qb)));
+                &out[i],
+                DirectX::XMMatrixMultiply(
+                    DirectX::XMLoadFloat4x4(&d[i]),
+                    DirectX::XMLoadFloat4x4(&d[i + matrix_batch_size / 2])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (matrix_batch_size / 2));
@@ -707,19 +834,17 @@ BENCHMARK(bm_dx_math_matrix4x4_multiply_throughput);
 // same as ours for the same stored bytes. The instruction count is, which is all
 // this measures.
 static void bm_glm_matrix4x4_multiply_throughput(benchmark::State& state) {
-    const auto& d = matrix_data();
-    std::vector<glm::mat4> out(matrix_batch_size / 2);
+    const auto& arena = matrix_multiply_arena();
+    const auto* d = arena.as<const glm::mat4>(0);
+    auto* out = arena.as<glm::mat4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size / 2; ++i) {
-            const auto& a = *reinterpret_cast<const glm::mat4*>(
-                &d[static_cast<size_t>(i)].m[0][0]);
-            const auto& b = *reinterpret_cast<const glm::mat4*>(
-                &d[static_cast<size_t>(i + matrix_batch_size / 2)].m[0][0]);
-            out[static_cast<size_t>(i)] = a * b;
+            out[i] = d[i] * d[i + matrix_batch_size / 2];
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (matrix_batch_size / 2));
@@ -728,11 +853,12 @@ BENCHMARK(bm_glm_matrix4x4_multiply_throughput);
 #endif
 
 static void bm_mathematics_matrix4x4_inverse(benchmark::State& state) {
-    auto& arena_instance = get_inverse_arena();
-    const auto* in = reinterpret_cast<const math::matrix4x4*>(arena_instance.in);
-    auto* out = reinterpret_cast<math::matrix4x4*>(arena_instance.out);
+    const auto& arena = matrix_inverse_arena();
+    const auto* in = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
             out[i] = math::inverse(in[i]);
@@ -748,9 +874,9 @@ BENCHMARK(bm_mathematics_matrix4x4_inverse);
 // than by an identity sentinel. This measures the optional construction and
 // success check on the overwhelmingly common invertible path.
 static void bm_cxx20_matrix4x4_try_inverse_optional(benchmark::State& state) {
-    auto& arena_instance = get_inverse_arena();
-    const auto* in = reinterpret_cast<const math::matrix4x4*>(arena_instance.in);
-    auto* out = reinterpret_cast<math::matrix4x4*>(arena_instance.out);
+    const auto& arena = matrix_inverse_arena();
+    const auto* in = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
@@ -764,18 +890,25 @@ static void bm_cxx20_matrix4x4_try_inverse_optional(benchmark::State& state) {
 }
 BENCHMARK(bm_cxx20_matrix4x4_try_inverse_optional);
 
+// The two forms are charged the same escape budget. This one used to call
+// DoNotOptimize on its success flag once per ITEM while the optional form below
+// escaped nothing per item, which taxed the out-parameter API for a barrier the
+// other never paid. Summing the flag keeps every call's result observable and
+// moves the escape to once per batch, where the optional form already has it.
 static void bm_cxx20_decompose_out_parameters(benchmark::State& state) {
-    const auto& in = matrix_data();
-    std::vector<math::decomposed_transform> out(matrix_batch_size);
+    const auto& arena = decompose_arena();
+    const auto* in = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::decomposed_transform>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
+        unsigned succeeded = 0;
         for (int i = 0; i < matrix_batch_size; ++i) {
-            auto& value = out[static_cast<size_t>(i)];
-            bool ok = math::decompose(in[static_cast<size_t>(i)], value.scale,
-                                      value.rotation, value.translation);
-            benchmark::DoNotOptimize(ok);
+            auto& value = out[i];
+            succeeded += static_cast<unsigned>(math::decompose(
+                in[i], value.scale, value.rotation, value.translation));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(succeeded);
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * matrix_batch_size);
@@ -783,15 +916,16 @@ static void bm_cxx20_decompose_out_parameters(benchmark::State& state) {
 BENCHMARK(bm_cxx20_decompose_out_parameters);
 
 static void bm_cxx20_decompose_optional(benchmark::State& state) {
-    const auto& in = matrix_data();
-    std::vector<math::decomposed_transform> out(matrix_batch_size);
+    const auto& arena = decompose_arena();
+    const auto* in = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::decomposed_transform>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
-            const auto value = math::decompose(in[static_cast<size_t>(i)]);
-            if (value) out[static_cast<size_t>(i)] = *value;
+            const auto value = math::decompose(in[i]);
+            if (value) out[i] = *value;
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * matrix_batch_size);
@@ -800,11 +934,12 @@ BENCHMARK(bm_cxx20_decompose_optional);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_matrix4x4_inverse(benchmark::State& state) {
-    auto& arena_instance = get_inverse_arena();
-    const auto* in = reinterpret_cast<const DirectX::XMFLOAT4X4*>(arena_instance.in);
-    auto* out = reinterpret_cast<DirectX::XMFLOAT4X4*>(arena_instance.out);
+    const auto& arena = matrix_inverse_arena();
+    const auto* in = arena.as<const DirectX::XMFLOAT4X4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4X4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
             DirectX::XMStoreFloat4x4(
@@ -821,11 +956,12 @@ BENCHMARK(bm_dx_math_matrix4x4_inverse);
 
 #if MATHEMATICS_BENCH_HAS_GLM
 static void bm_glm_matrix4x4_inverse(benchmark::State& state) {
-    auto& arena_instance = get_inverse_arena();
-    const auto* in = reinterpret_cast<const glm::mat4*>(arena_instance.in);
-    auto* out = reinterpret_cast<glm::mat4*>(arena_instance.out);
+    const auto& arena = matrix_inverse_arena();
+    const auto* in = arena.as<const glm::mat4>(0);
+    auto* out = arena.as<glm::mat4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
             out[i] = glm::inverse(in[i]);
@@ -841,21 +977,47 @@ BENCHMARK(bm_glm_matrix4x4_inverse);
 // ========================================================== throughput: mul_add
 // Streams over arrays. This is where storage-type and ABI decisions show up --
 // the register-resident latency benchmarks above cannot see them.
+namespace {
+
+// Region 0 holds all three operand streams exactly as data() lays them out, so
+// their relative offsets are unchanged and only the output moves.
+stream_arena<2>& mul_add_arena() {
+    static auto instance = make_arena(
+        arena_region{data().data(), 3 * batch_size * sizeof(float4)},
+        arena_region{nullptr, batch_size * sizeof(float4)});
+    return instance;
+}
+
+#if MATHEMATICS_BENCH_HAS_DXMATH
+static_assert(sizeof(DirectX::XMFLOAT4A) == sizeof(float4),
+              "the baselines share the family's input and output regions");
+#endif
+#if MATHEMATICS_BENCH_HAS_GLM
+static_assert(sizeof(glm::vec4) == sizeof(float4),
+              "the baselines share the family's input and output regions");
+#endif
+#if MATHEMATICS_BENCH_HAS_VECTORMATH
+static_assert(sizeof(Vectormath::SSE::Vector4) == sizeof(float4),
+              "the baselines share the family's input and output regions");
+#endif
+
+} // namespace
 
 static void bm_mathematics_mul_add_throughput(benchmark::State& state) {
-    const auto& d = data();
-    std::vector<float4> out(batch_size);
+    const auto& arena = mul_add_arena();
+    const auto* d = arena.as<const float4>(0);
+    auto* out = arena.as<float4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < batch_size; ++i) {
             const math::vec_reg a = math::load_aligned(d[i].v);
             const math::vec_reg b = math::load_aligned(d[i + batch_size].v);
             const math::vec_reg c = math::load_aligned(d[i + 2 * batch_size].v);
-            math::store_aligned(out[static_cast<size_t>(i)].v,
-                                math::mul_add(a, b, c));
+            math::store_aligned(out[i].v, math::mul_add(a, b, c));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * batch_size);
@@ -864,24 +1026,22 @@ BENCHMARK(bm_mathematics_mul_add_throughput);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_mul_add_throughput(benchmark::State& state) {
-    const auto& d = data();
-    std::vector<DirectX::XMFLOAT4A> out(batch_size);
+    const auto& arena = mul_add_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4A>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4A>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < batch_size; ++i) {
-            const auto* qa = reinterpret_cast<const DirectX::XMFLOAT4A*>(d[i].v);
-            const auto* qb =
-                reinterpret_cast<const DirectX::XMFLOAT4A*>(d[i + batch_size].v);
-            const auto* qc =
-                reinterpret_cast<const DirectX::XMFLOAT4A*>(d[i + 2 * batch_size].v);
             DirectX::XMStoreFloat4A(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMVectorMultiplyAdd(DirectX::XMLoadFloat4A(qa),
-                                             DirectX::XMLoadFloat4A(qb),
-                                             DirectX::XMLoadFloat4A(qc)));
+                &out[i],
+                DirectX::XMVectorMultiplyAdd(
+                    DirectX::XMLoadFloat4A(&d[i]),
+                    DirectX::XMLoadFloat4A(&d[i + batch_size]),
+                    DirectX::XMLoadFloat4A(&d[i + 2 * batch_size])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * batch_size);
@@ -891,19 +1051,17 @@ BENCHMARK(bm_dx_math_mul_add_throughput);
 
 #if MATHEMATICS_BENCH_HAS_GLM
 static void bm_glm_mul_add_throughput(benchmark::State& state) {
-    const auto& d = data();
-    std::vector<glm::vec4> out(batch_size);
+    const auto& arena = mul_add_arena();
+    const auto* d = arena.as<const glm::vec4>(0);
+    auto* out = arena.as<glm::vec4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < batch_size; ++i) {
-            const auto& a = *reinterpret_cast<const glm::vec4*>(d[i].v);
-            const auto& b = *reinterpret_cast<const glm::vec4*>(d[i + batch_size].v);
-            const auto& c =
-                *reinterpret_cast<const glm::vec4*>(d[i + 2 * batch_size].v);
-            out[static_cast<size_t>(i)] = a * b + c;
+            out[i] = d[i] * d[i + batch_size] + d[i + 2 * batch_size];
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * batch_size);
@@ -913,10 +1071,12 @@ BENCHMARK(bm_glm_mul_add_throughput);
 
 #if MATHEMATICS_BENCH_HAS_VECTORMATH
 static void bm_vectormath_mul_add_throughput(benchmark::State& state) {
-    const auto& d = data();
-    std::vector<Vectormath::SSE::Vector4> out(batch_size);
+    const auto& arena = mul_add_arena();
+    const auto* d = arena.as<const float4>(0);
+    auto* out = arena.as<Vectormath::SSE::Vector4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < batch_size; ++i) {
             // Vectormath exposes no load helper for vector4, but it is an
@@ -925,9 +1085,9 @@ static void bm_vectormath_mul_add_throughput(benchmark::State& state) {
             const Vectormath::SSE::Vector4 a(_mm_load_ps(d[i].v));
             const Vectormath::SSE::Vector4 b(_mm_load_ps(d[i + batch_size].v));
             const Vectormath::SSE::Vector4 c(_mm_load_ps(d[i + 2 * batch_size].v));
-            out[static_cast<size_t>(i)] = Vectormath::SSE::mulPerElem(a, b) + c;
+            out[i] = Vectormath::SSE::mulPerElem(a, b) + c;
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * batch_size);
@@ -964,6 +1124,56 @@ const std::vector<math::quaternion>& quaternion_data() {
 // instruction under test. A small angle was tried first and drifted out of range
 // within one run.
 const math::quaternion half_turn_z{0.0f, 0.0f, 1.0f, 0.0f};
+
+// One arena per quaternion family. Every one of these pairs Mathematics against
+// DirectXMath, and the pair only means something if both sides stream through
+// the same addresses -- see the note on stream_arena.
+constexpr std::size_t quaternion_stream_bytes =
+    quaternion_batch_size * sizeof(math::quaternion);
+
+stream_arena<2>& quaternion_multiply_arena() {
+    static auto instance = make_arena(
+        arena_region{quaternion_data().data(), quaternion_stream_bytes},
+        arena_region{nullptr, quaternion_stream_bytes / 2});
+    return instance;
+}
+
+stream_arena<2>& quaternion_slerp_arena() {
+    static auto instance = make_arena(
+        arena_region{quaternion_data().data(), quaternion_stream_bytes},
+        arena_region{nullptr, quaternion_stream_bytes / 2});
+    return instance;
+}
+
+// Two input streams here: the rotations and the points they are applied to.
+stream_arena<3>& quaternion_rotate_arena() {
+    static auto instance = make_arena(
+        arena_region{quaternion_data().data(), quaternion_stream_bytes},
+        arena_region{data().data(), quaternion_batch_size * sizeof(float4)},
+        arena_region{nullptr, quaternion_batch_size * sizeof(math::vector3)});
+    return instance;
+}
+
+stream_arena<2>& quaternion_to_matrix_arena() {
+    static auto instance = make_arena(
+        arena_region{quaternion_data().data(), quaternion_stream_bytes},
+        arena_region{nullptr,
+                     quaternion_batch_size * sizeof(math::matrix4x4)});
+    return instance;
+}
+
+stream_arena<2>& transform_compose_arena() {
+    static auto instance = make_arena(
+        arena_region{quaternion_data().data(), quaternion_stream_bytes},
+        arena_region{nullptr,
+                     quaternion_batch_size * sizeof(math::matrix4x4)});
+    return instance;
+}
+
+#if MATHEMATICS_BENCH_HAS_DXMATH
+static_assert(sizeof(DirectX::XMFLOAT4) == sizeof(math::quaternion),
+              "the baselines share the family's input and output regions");
+#endif
 
 } // namespace
 
@@ -1029,16 +1239,17 @@ BENCHMARK(bm_dx_math_quaternion_multiply_latency_packed);
 #endif
 
 static void bm_mathematics_quaternion_multiply_throughput(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<math::quaternion> out(quaternion_batch_size / 2);
+    const auto& arena = quaternion_multiply_arena();
+    const auto* d = arena.as<const math::quaternion>(0);
+    auto* out = arena.as<math::quaternion>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size / 2; ++i) {
-            out[static_cast<size_t>(i)] =
-                d[static_cast<size_t>(i)] * d[static_cast<size_t>(i + quaternion_batch_size / 2)];
+            out[i] = d[i] * d[i + quaternion_batch_size / 2];
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (quaternion_batch_size / 2));
@@ -1047,22 +1258,21 @@ BENCHMARK(bm_mathematics_quaternion_multiply_throughput);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_quaternion_multiply_throughput(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<DirectX::XMFLOAT4> out(quaternion_batch_size / 2);
+    const auto& arena = quaternion_multiply_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size / 2; ++i) {
-            const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i)].x);
-            const auto* b = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i + quaternion_batch_size / 2)].x);
             DirectX::XMStoreFloat4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMQuaternionMultiply(DirectX::XMLoadFloat4(a),
-                                              DirectX::XMLoadFloat4(b)));
+                &out[i],
+                DirectX::XMQuaternionMultiply(
+                    DirectX::XMLoadFloat4(&d[i]),
+                    DirectX::XMLoadFloat4(&d[i + quaternion_batch_size / 2])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (quaternion_batch_size / 2));
@@ -1077,25 +1287,25 @@ BENCHMARK(bm_dx_math_quaternion_multiply_throughput);
 // may hoist the whole batch out of the timing loop. Clang did exactly that to
 // the DirectXMath version, which reported 0.245 ns for 128 slerps -- 523 G/s,
 // three orders of magnitude past plausible, and the kind of number that reads
-// as a win if nobody checks it. The usual `DoNotOptimize(out.data())` after the
+// as a win if nobody checks it. The usual `DoNotOptimize(out)` after the
 // loop was not enough: it escapes the pointer, not what was written through it,
 // so the stores stayed dead. Making `t` opaque was not enough either.
 // DoNotOptimize on each element is, and it costs both sides the same.
 static void bm_mathematics_quaternion_slerp(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<math::quaternion> out(quaternion_batch_size / 2);
+    const auto& arena = quaternion_slerp_arena();
+    const auto* d = arena.as<const math::quaternion>(0);
+    auto* out = arena.as<math::quaternion>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         float t = 0.37f;
         benchmark::DoNotOptimize(t);
         for (int i = 0; i < quaternion_batch_size / 2; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::slerp(d[static_cast<size_t>(i)],
-                             d[static_cast<size_t>(i + quaternion_batch_size / 2)], t);
-            benchmark::DoNotOptimize(out[static_cast<size_t>(i)]);
+            out[i] = math::slerp(d[i], d[i + quaternion_batch_size / 2], t);
+            benchmark::DoNotOptimize(out[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (quaternion_batch_size / 2));
@@ -1104,25 +1314,24 @@ BENCHMARK(bm_mathematics_quaternion_slerp);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_quaternion_slerp(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<DirectX::XMFLOAT4> out(quaternion_batch_size / 2);
+    const auto& arena = quaternion_slerp_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         float t = 0.37f;
         benchmark::DoNotOptimize(t);
         for (int i = 0; i < quaternion_batch_size / 2; ++i) {
-            const auto* a = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i)].x);
-            const auto* b = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i + quaternion_batch_size / 2)].x);
             DirectX::XMStoreFloat4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMQuaternionSlerp(DirectX::XMLoadFloat4(a),
-                                           DirectX::XMLoadFloat4(b), t));
-            benchmark::DoNotOptimize(out[static_cast<size_t>(i)]);
+                &out[i],
+                DirectX::XMQuaternionSlerp(
+                    DirectX::XMLoadFloat4(&d[i]),
+                    DirectX::XMLoadFloat4(&d[i + quaternion_batch_size / 2]), t));
+            benchmark::DoNotOptimize(out[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (quaternion_batch_size / 2));
@@ -1133,20 +1342,19 @@ BENCHMARK(bm_dx_math_quaternion_slerp);
 // Rotating a vector by a quaternion, which is what a skinning or particle
 // system actually spends its time on.
 static void bm_mathematics_quaternion_rotate_vector(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    const auto& v = data();
-    std::vector<math::vector3> out(quaternion_batch_size);
+    const auto& arena = quaternion_rotate_arena();
+    const auto* d = arena.as<const math::quaternion>(0);
+    const auto* v = arena.as<const float4>(1);
+    auto* out = arena.as<math::vector3>(2);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            const math::vector3 p{v[static_cast<size_t>(i)].v[0],
-                                   v[static_cast<size_t>(i)].v[1],
-                                   v[static_cast<size_t>(i)].v[2]};
-            out[static_cast<size_t>(i)] =
-                math::rotate(p, d[static_cast<size_t>(i)]);
+            const math::vector3 p{v[i].v[0], v[i].v[1], v[i].v[2]};
+            out[i] = math::rotate(p, d[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1155,23 +1363,21 @@ BENCHMARK(bm_mathematics_quaternion_rotate_vector);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_quaternion_rotate_vector(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    const auto& v = data();
-    std::vector<DirectX::XMFLOAT3> out(quaternion_batch_size);
+    const auto& arena = quaternion_rotate_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4>(0);
+    const auto* v = arena.as<const float4>(1);
+    auto* out = arena.as<DirectX::XMFLOAT3>(2);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i)].x);
-            const DirectX::XMVECTOR p = DirectX::XMVectorSet(
-                v[static_cast<size_t>(i)].v[0], v[static_cast<size_t>(i)].v[1],
-                v[static_cast<size_t>(i)].v[2], 0.0f);
+            const DirectX::XMVECTOR p =
+                DirectX::XMVectorSet(v[i].v[0], v[i].v[1], v[i].v[2], 0.0f);
             DirectX::XMStoreFloat3(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMVector3Rotate(p, DirectX::XMLoadFloat4(q)));
+                &out[i], DirectX::XMVector3Rotate(p, DirectX::XMLoadFloat4(&d[i])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1181,16 +1387,17 @@ BENCHMARK(bm_dx_math_quaternion_rotate_vector);
 
 // quaternion to matrix -- once per object per frame in any scene graph.
 static void bm_mathematics_quaternion_to_matrix(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<math::matrix4x4> out(quaternion_batch_size);
+    const auto& arena = quaternion_to_matrix_arena();
+    const auto* d = arena.as<const math::quaternion>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::rotation_matrix(d[static_cast<size_t>(i)]);
+            out[i] = math::rotation_matrix(d[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1199,19 +1406,19 @@ BENCHMARK(bm_mathematics_quaternion_to_matrix);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_quaternion_to_matrix(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<DirectX::XMFLOAT4X4> out(quaternion_batch_size);
+    const auto& arena = quaternion_to_matrix_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4X4>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i)].x);
             DirectX::XMStoreFloat4x4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMMatrixRotationQuaternion(DirectX::XMLoadFloat4(q)));
+                &out[i], DirectX::XMMatrixRotationQuaternion(
+                             DirectX::XMLoadFloat4(&d[i])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1221,18 +1428,19 @@ BENCHMARK(bm_dx_math_quaternion_to_matrix);
 
 // The full TRS build, which is the per-object cost in a scene graph.
 static void bm_mathematics_transform_compose(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<math::matrix4x4> out(quaternion_batch_size);
+    const auto& arena = transform_compose_arena();
+    const auto* d = arena.as<const math::quaternion>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     const math::vector3 scale{1.5f, 2.0f, 0.75f};
     const math::vector3 translation{3.0f, -4.0f, 5.0f};
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::compose(scale, d[static_cast<size_t>(i)], translation);
+            out[i] = math::compose(scale, d[i], translation);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1241,24 +1449,24 @@ BENCHMARK(bm_mathematics_transform_compose);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_transform_compose(benchmark::State& state) {
-    const auto& d = quaternion_data();
-    std::vector<DirectX::XMFLOAT4X4> out(quaternion_batch_size);
+    const auto& arena = transform_compose_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4X4>(1);
     const DirectX::XMVECTOR scale = DirectX::XMVectorSet(1.5f, 2.0f, 0.75f, 0.0f);
     const DirectX::XMVECTOR translation =
         DirectX::XMVectorSet(3.0f, -4.0f, 5.0f, 0.0f);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4*>(
-                &d[static_cast<size_t>(i)].x);
             DirectX::XMStoreFloat4x4(
-                &out[static_cast<size_t>(i)],
+                &out[i],
                 DirectX::XMMatrixAffineTransformation(
-                    scale, DirectX::XMVectorZero(), DirectX::XMLoadFloat4(q),
-                    translation));
+                    scale, DirectX::XMVectorZero(),
+                    DirectX::XMLoadFloat4(&d[i]), translation));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1284,21 +1492,32 @@ const std::vector<float>& angle_data() {
     return data;
 }
 
+// Sine and cosine interleaved into one output stream, so the region is two
+// floats per angle.
+stream_arena<2>& sin_cos_arena() {
+    static auto instance = make_arena(
+        arena_region{angle_data().data(), quaternion_batch_size * sizeof(float)},
+        arena_region{nullptr, 2 * quaternion_batch_size * sizeof(float)});
+    return instance;
+}
+
 } // namespace
 
 static void bm_mathematics_sin_cos(benchmark::State& state) {
-    const auto& d = angle_data();
-    std::vector<float> out(static_cast<size_t>(quaternion_batch_size) * 2);
+    const auto& arena = sin_cos_arena();
+    const auto* d = arena.as<const float>(0);
+    auto* out = arena.as<float>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
             float s = 0.0f, c = 0.0f;
-            math::sin_cos(d[static_cast<size_t>(i)], s, c);
-            out[static_cast<size_t>(i) * 2] = s;
-            out[static_cast<size_t>(i) * 2 + 1] = c;
+            math::sin_cos(d[i], s, c);
+            out[i * 2] = s;
+            out[i * 2 + 1] = c;
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1306,16 +1525,18 @@ static void bm_mathematics_sin_cos(benchmark::State& state) {
 BENCHMARK(bm_mathematics_sin_cos);
 
 static void bm_std_lib_sin_cos(benchmark::State& state) {
-    const auto& d = angle_data();
-    std::vector<float> out(static_cast<size_t>(quaternion_batch_size) * 2);
+    const auto& arena = sin_cos_arena();
+    const auto* d = arena.as<const float>(0);
+    auto* out = arena.as<float>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
-            out[static_cast<size_t>(i) * 2] = std::sin(d[static_cast<size_t>(i)]);
-            out[static_cast<size_t>(i) * 2 + 1] = std::cos(d[static_cast<size_t>(i)]);
+            out[i * 2] = std::sin(d[i]);
+            out[i * 2 + 1] = std::cos(d[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1324,18 +1545,20 @@ BENCHMARK(bm_std_lib_sin_cos);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_sin_cos(benchmark::State& state) {
-    const auto& d = angle_data();
-    std::vector<float> out(static_cast<size_t>(quaternion_batch_size) * 2);
+    const auto& arena = sin_cos_arena();
+    const auto* d = arena.as<const float>(0);
+    auto* out = arena.as<float>(1);
     for (auto _ : state) {
-        // See the note on anchor(): without this the whole batch hoists out.
+        // The input is loop-invariant; without this barrier the compiler is
+        // free to hoist the whole batch out of the timing loop.
         benchmark::ClobberMemory();
         for (int i = 0; i < quaternion_batch_size; ++i) {
             float s = 0.0f, c = 0.0f;
-            DirectX::XMScalarSinCos(&s, &c, d[static_cast<size_t>(i)]);
-            out[static_cast<size_t>(i) * 2] = s;
-            out[static_cast<size_t>(i) * 2 + 1] = c;
+            DirectX::XMScalarSinCos(&s, &c, d[i]);
+            out[i * 2] = s;
+            out[i * 2 + 1] = c;
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * quaternion_batch_size);
@@ -1376,16 +1599,56 @@ const std::vector<math::ray>& ray_data() {
     }();
     return rays;
 }
+
+constexpr std::size_t point_stream_bytes = stream_count * sizeof(math::vector3);
+
+// The five aabb benchmarks all read region 0, so the pointer, span and range
+// overloads are compared over one address rather than three allocations.
+stream_arena<2>& aabb_arena() {
+    static auto instance = make_arena(
+        arena_region{stream_data().data(), point_stream_bytes},
+        arena_region{nullptr, (stream_count / 2) * sizeof(math::aabb)});
+    return instance;
+}
+
+stream_arena<2>& raycast_arena() {
+    static auto instance = make_arena(
+        arena_region{ray_data().data(), stream_count * sizeof(math::ray)},
+        arena_region{nullptr, stream_count * sizeof(float)});
+    return instance;
+}
+
+stream_arena<2>& cross_arena() {
+    static auto instance = make_arena(
+        arena_region{stream_data().data(), point_stream_bytes},
+        arena_region{nullptr, (stream_count / 2) * sizeof(math::vector3)});
+    return instance;
+}
+
+stream_arena<2>& transform_point_arena() {
+    static auto instance = make_arena(
+        arena_region{stream_data().data(), point_stream_bytes},
+        arena_region{nullptr, point_stream_bytes});
+    return instance;
+}
 } // namespace
 
 // ========================================= C++20 API cost and safety tradeoffs
 // Pointer/count and span deliberately keep independent loops so a standard
 // library change cannot silently alter the established engine hot path.
 static void bm_cxx20_aabb_from_points_pointer(benchmark::State& state) {
-    const auto& points = stream_data();
+    const auto* points = aabb_arena().as<const math::vector3>(0);
     for (auto _ : state) {
         benchmark::ClobberMemory();
-        math::aabb box = math::aabb_from_points(points.data(), stream_count);
+        // The count is made opaque deliberately. Passing the constant straight
+        // through handed this overload -- and only this one -- a compile-time
+        // trip count, so what it was being compared against was a differently
+        // compiled loop rather than a different API. The span and range
+        // overloads carry their length in an object the barrier forces a
+        // reload of; this gives the pointer form the same footing.
+        int count = stream_count;
+        benchmark::DoNotOptimize(count);
+        math::aabb box = math::aabb_from_points(points, count);
         benchmark::DoNotOptimize(box);
     }
     state.SetItemsProcessed(state.iterations() * stream_count);
@@ -1393,8 +1656,9 @@ static void bm_cxx20_aabb_from_points_pointer(benchmark::State& state) {
 BENCHMARK(bm_cxx20_aabb_from_points_pointer);
 
 static void bm_cxx20_aabb_from_points_span(benchmark::State& state) {
-    const auto& points = stream_data();
-    const std::span<const math::vector3> view{points};
+    const std::span<const math::vector3> view{
+        aabb_arena().as<const math::vector3>(0),
+        static_cast<std::size_t>(stream_count)};
     for (auto _ : state) {
         benchmark::ClobberMemory();
         math::aabb box = math::aabb_from_points(view);
@@ -1405,8 +1669,9 @@ static void bm_cxx20_aabb_from_points_span(benchmark::State& state) {
 BENCHMARK(bm_cxx20_aabb_from_points_span);
 
 static void bm_cxx20_aabb_from_points_range(benchmark::State& state) {
-    const auto& points = stream_data();
-    auto view = std::span<const math::vector3>{points} |
+    auto view = std::span<const math::vector3>{
+                    aabb_arena().as<const math::vector3>(0),
+                    static_cast<std::size_t>(stream_count)} |
                 std::views::transform([](const math::vector3& point) {
                     return point;
                 });
@@ -1426,17 +1691,17 @@ static math::aabb legacy_aabb_from_min_max(const math::vector3& minimum,
 }
 
 static void bm_cxx20_aabb_legacy_arithmetic(benchmark::State& state) {
-    const auto& points = stream_data();
-    std::vector<math::aabb> out(stream_count / 2);
+    const auto& arena = aabb_arena();
+    const auto* points = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::aabb>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count / 2; ++i) {
-            const auto& a = points[static_cast<size_t>(i)];
-            const auto& b = points[static_cast<size_t>(i + stream_count / 2)];
-            out[static_cast<size_t>(i)] =
-                legacy_aabb_from_min_max(math::min(a, b), math::max(a, b));
+            const auto& a = points[i];
+            const auto& b = points[i + stream_count / 2];
+            out[i] = legacy_aabb_from_min_max(math::min(a, b), math::max(a, b));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (stream_count / 2));
@@ -1444,17 +1709,17 @@ static void bm_cxx20_aabb_legacy_arithmetic(benchmark::State& state) {
 BENCHMARK(bm_cxx20_aabb_legacy_arithmetic);
 
 static void bm_cxx20_aabb_midpoint(benchmark::State& state) {
-    const auto& points = stream_data();
-    std::vector<math::aabb> out(stream_count / 2);
+    const auto& arena = aabb_arena();
+    const auto* points = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::aabb>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count / 2; ++i) {
-            const auto& a = points[static_cast<size_t>(i)];
-            const auto& b = points[static_cast<size_t>(i + stream_count / 2)];
-            out[static_cast<size_t>(i)] =
-                math::aabb::from_min_max(math::min(a, b), math::max(a, b));
+            const auto& a = points[i];
+            const auto& b = points[i + stream_count / 2];
+            out[i] = math::aabb::from_min_max(math::min(a, b), math::max(a, b));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (stream_count / 2));
@@ -1462,18 +1727,18 @@ static void bm_cxx20_aabb_midpoint(benchmark::State& state) {
 BENCHMARK(bm_cxx20_aabb_midpoint);
 
 static void bm_cxx20_raycast_out_parameter(benchmark::State& state) {
-    const auto& rays = ray_data();
+    const auto& arena = raycast_arena();
+    const auto* rays = arena.as<const math::ray>(0);
+    auto* out = arena.as<float>(1);
     const math::sphere target{math::vector3{}, 5.0f};
-    std::vector<float> out(stream_count);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count; ++i) {
             float distance = -1.0f;
-            const bool hit = math::raycast(rays[static_cast<size_t>(i)], target,
-                                           distance);
-            out[static_cast<size_t>(i)] = hit ? distance : -1.0f;
+            const bool hit = math::raycast(rays[i], target, distance);
+            out[i] = hit ? distance : -1.0f;
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * stream_count);
@@ -1481,16 +1746,16 @@ static void bm_cxx20_raycast_out_parameter(benchmark::State& state) {
 BENCHMARK(bm_cxx20_raycast_out_parameter);
 
 static void bm_cxx20_raycast_optional(benchmark::State& state) {
-    const auto& rays = ray_data();
+    const auto& arena = raycast_arena();
+    const auto* rays = arena.as<const math::ray>(0);
+    auto* out = arena.as<float>(1);
     const math::sphere target{math::vector3{}, 5.0f};
-    std::vector<float> out(stream_count);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::raycast(rays[static_cast<size_t>(i)], target).value_or(-1.0f);
+            out[i] = math::raycast(rays[i], target).value_or(-1.0f);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * stream_count);
@@ -1548,16 +1813,15 @@ BENCHMARK(bm_dx_math_cross_latency_packed);
 #endif
 
 static void bm_mathematics_cross_throughput(benchmark::State& state) {
-    const auto& d = stream_data();
-    std::vector<math::vector3> out(stream_count / 2);
+    const auto& arena = cross_arena();
+    const auto* d = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::vector3>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count / 2; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::cross(d[static_cast<size_t>(i)],
-                             d[static_cast<size_t>(i + stream_count / 2)]);
+            out[i] = math::cross(d[i], d[i + stream_count / 2]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (stream_count / 2));
@@ -1566,21 +1830,19 @@ BENCHMARK(bm_mathematics_cross_throughput);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_cross_throughput(benchmark::State& state) {
-    const auto& d = stream_data();
-    std::vector<DirectX::XMFLOAT3> out(stream_count / 2);
+    const auto& arena = cross_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT3>(0);
+    auto* out = arena.as<DirectX::XMFLOAT3>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count / 2; ++i) {
-            const auto* a = reinterpret_cast<const DirectX::XMFLOAT3*>(
-                &d[static_cast<size_t>(i)].x);
-            const auto* b = reinterpret_cast<const DirectX::XMFLOAT3*>(
-                &d[static_cast<size_t>(i + stream_count / 2)].x);
             DirectX::XMStoreFloat3(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMVector3Cross(DirectX::XMLoadFloat3(a),
-                                        DirectX::XMLoadFloat3(b)));
+                &out[i],
+                DirectX::XMVector3Cross(
+                    DirectX::XMLoadFloat3(&d[i]),
+                    DirectX::XMLoadFloat3(&d[i + stream_count / 2])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * (stream_count / 2));
@@ -1589,14 +1851,15 @@ BENCHMARK(bm_dx_math_cross_throughput);
 #endif
 
 static void bm_mathematics_matrix4x4_transpose(benchmark::State& state) {
-    const auto& d = matrix_data();
-    std::vector<math::matrix4x4> out(matrix_batch_size);
+    const auto& arena = matrix_transpose_arena();
+    const auto* d = arena.as<const math::matrix4x4>(0);
+    auto* out = arena.as<math::matrix4x4>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
-            out[static_cast<size_t>(i)] = transpose(d[static_cast<size_t>(i)]);
+            out[i] = transpose(d[i]);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * matrix_batch_size);
@@ -1605,18 +1868,17 @@ BENCHMARK(bm_mathematics_matrix4x4_transpose);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_matrix4x4_transpose(benchmark::State& state) {
-    const auto& d = matrix_data();
-    std::vector<DirectX::XMFLOAT4X4> out(matrix_batch_size);
+    const auto& arena = matrix_transpose_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT4X4>(0);
+    auto* out = arena.as<DirectX::XMFLOAT4X4>(1);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < matrix_batch_size; ++i) {
-            const auto* q = reinterpret_cast<const DirectX::XMFLOAT4X4*>(
-                &d[static_cast<size_t>(i)].m[0][0]);
             DirectX::XMStoreFloat4x4(
-                &out[static_cast<size_t>(i)],
-                DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(q)));
+                &out[i],
+                DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&d[i])));
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * matrix_batch_size);
@@ -1629,19 +1891,19 @@ BENCHMARK(bm_dx_math_matrix4x4_transpose);
 // Mathematics has no equivalent by design -- the loop IS the entry point -- so this
 // measures whether that design costs anything.
 static void bm_mathematics_transform_point_stream(benchmark::State& state) {
-    const auto& d = stream_data();
+    const auto& arena = transform_point_arena();
+    const auto* d = arena.as<const math::vector3>(0);
+    auto* out = arena.as<math::vector3>(1);
     const math::matrix4x4 world = math::compose(
         math::vector3{1.5f, 1.5f, 1.5f},
         math::quaternion_from_axis_angle(math::vector3{0, 1, 0}, 0.7f),
         math::vector3{3, -4, 5});
-    std::vector<math::vector3> out(stream_count);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         for (int i = 0; i < stream_count; ++i) {
-            out[static_cast<size_t>(i)] =
-                math::transform_point(d[static_cast<size_t>(i)], world);
+            out[i] = math::transform_point(d[i], world);
         }
-        benchmark::DoNotOptimize(out.data());
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * stream_count);
@@ -1650,21 +1912,21 @@ BENCHMARK(bm_mathematics_transform_point_stream);
 
 #if MATHEMATICS_BENCH_HAS_DXMATH
 static void bm_dx_math_transform_coord_stream(benchmark::State& state) {
-    const auto& d = stream_data();
+    const auto& arena = transform_point_arena();
+    const auto* d = arena.as<const DirectX::XMFLOAT3>(0);
+    auto* out = arena.as<DirectX::XMFLOAT3>(1);
     const math::matrix4x4 world = math::compose(
         math::vector3{1.5f, 1.5f, 1.5f},
         math::quaternion_from_axis_angle(math::vector3{0, 1, 0}, 0.7f),
         math::vector3{3, -4, 5});
     const DirectX::XMMATRIX xm = DirectX::XMLoadFloat4x4(
         reinterpret_cast<const DirectX::XMFLOAT4X4*>(&world.m[0][0]));
-    std::vector<DirectX::XMFLOAT3> out(stream_count);
     for (auto _ : state) {
         benchmark::ClobberMemory();
         DirectX::XMVector3TransformCoordStream(
-            out.data(), sizeof(DirectX::XMFLOAT3),
-            reinterpret_cast<const DirectX::XMFLOAT3*>(d.data()),
-            sizeof(math::vector3), stream_count, xm);
-        benchmark::DoNotOptimize(out.data());
+            out, sizeof(DirectX::XMFLOAT3), d, sizeof(math::vector3),
+            stream_count, xm);
+        benchmark::DoNotOptimize(out);
         benchmark::ClobberMemory();
     }
     state.SetItemsProcessed(state.iterations() * stream_count);
@@ -1675,10 +1937,35 @@ BENCHMARK(bm_dx_math_transform_coord_stream);
 // =========================================== fixed-extent range terminal cost
 // Tiny-range timings complement spike/codegen_library.cpp. DoNotOptimize keeps
 // each input and result observable without adding work inside the operation.
+//
+// READ THE ASSEMBLY, NOT THESE NUMBERS. The loops here are one to three
+// instructions long, and at that size instruction-fetch alignment decides the
+// result. Shifting .text by sixteen bytes and relinking -- same object file,
+// same instruction bytes -- moves a 2x penalty from direct_transform onto the
+// view, fixed and pipeline variants and back off again:
+//
+//   .text shift | direct | view  | fixed | pipeline
+//   +0          | 0.481  | 0.241 | 0.238 | 0.245 ns
+//   +16         | 0.264  | 0.266 | 0.249 | 0.248 ns
+//   +32         | 0.266  | 0.499 | 0.504 | 0.494 ns
+//
+// The four compile to the SAME loop body -- one vmovaps, one vfmadd132ps, one
+// vmovaps -- so a gap between them is the linker talking, never the abstraction.
+// That is the finding this family exists to report, and it survives relinking;
+// the individual timings do not.
+//
+// The barrier at the top of each iteration makes the no-hoisting requirement
+// explicit instead of leaving it to DoNotOptimize, whose implementations happen
+// to carry a memory clobber of their own. It is free: adding it left all
+// nineteen of these functions byte-identical under both clang-cl and MSVC.
+// The for_each benchmarks do not carry it and do not need it either -- they
+// mutate `value` and escape it inside the loop, so each iteration already
+// depends on the last.
 static void bm_fixed_ranges_components_direct_sum(benchmark::State& state) {
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result = value.x + value.y + value.z + value.w;
         benchmark::DoNotOptimize(result);
     }
@@ -1689,6 +1976,7 @@ static void bm_fixed_ranges_components_view_sum(benchmark::State& state) {
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         float result = 0.0f;
         for (const float component : math::components(value)) result += component;
         benchmark::DoNotOptimize(result);
@@ -1700,6 +1988,7 @@ static void bm_fixed_ranges_components_fold(benchmark::State& state) {
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result = math::ranges::fold_fixed(
             math::components(value), 0.0f, std::plus<>{});
         benchmark::DoNotOptimize(result);
@@ -1711,6 +2000,7 @@ static void bm_fixed_ranges_components_pipeline_fold(benchmark::State& state) {
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result =
             math::components(value) |
             math::views::transform_fixed(
@@ -1726,6 +2016,7 @@ static void bm_fixed_ranges_components_direct_square_sum(
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result = value.x * value.x + value.y * value.y +
                              value.z * value.z + value.w * value.w;
         benchmark::DoNotOptimize(result);
@@ -1738,6 +2029,7 @@ static void bm_fixed_ranges_components_pipeline_square_sum(
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result =
             math::components(value) |
             math::views::transform_fixed(
@@ -1753,6 +2045,7 @@ static void bm_fixed_ranges_components_lazy_square_range_for(
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         float result = 0.0f;
         for (const float component :
              math::components(value) |
@@ -1771,6 +2064,7 @@ static void bm_fixed_ranges_components_lazy_range_for(
     math::vector4 value{1.25f, -2.5f, 3.75f, 4.5f};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         float result = 0.0f;
         for (const float component :
              math::components(value) |
@@ -1840,6 +2134,7 @@ static void bm_fixed_ranges_components_direct_transform(
     std::array<float, 4> output{};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         output[0] = value.x * 2.0f + 1.0f;
         output[1] = value.y * 2.0f + 1.0f;
         output[2] = value.z * 2.0f + 1.0f;
@@ -1855,6 +2150,7 @@ static void bm_fixed_ranges_components_view_transform(
     std::array<float, 4> output{};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         auto destination = output.begin();
         for (const float component : math::components(value)) {
             *destination++ = component * 2.0f + 1.0f;
@@ -1870,6 +2166,7 @@ static void bm_fixed_ranges_components_fixed_transform(
     std::array<float, 4> output{};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         static_cast<void>(math::ranges::transform_fixed(
             math::components(value), output.begin(),
             [](float component) { return component * 2.0f + 1.0f; }));
@@ -1884,6 +2181,7 @@ static void bm_fixed_ranges_components_pipeline_transform(
     std::array<float, 4> output{};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         static_cast<void>(
             math::components(value) |
             math::ranges::transform_fixed_to(
@@ -1902,6 +2200,7 @@ static void bm_fixed_ranges_rows_direct_sum(benchmark::State& state) {
                           13, 14, 15, 16};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         float result = 0.0f;
         for (std::size_t row = 0; row < 4; ++row) {
             for (std::size_t column = 0; column < 4; ++column) {
@@ -1920,6 +2219,7 @@ static void bm_fixed_ranges_rows_view_sum(benchmark::State& state) {
                           13, 14, 15, 16};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         float result = 0.0f;
         for (const auto row : math::rows(value)) {
             for (const float element : row) result += element;
@@ -1936,6 +2236,7 @@ static void bm_fixed_ranges_rows_fold(benchmark::State& state) {
                           13, 14, 15, 16};
     benchmark::DoNotOptimize(value);
     for (auto _ : state) {
+        benchmark::ClobberMemory();
         const float result = math::ranges::fold_fixed(
             math::rows(value), 0.0f,
             [](float accumulated, std::span<const float, 4> row) {
