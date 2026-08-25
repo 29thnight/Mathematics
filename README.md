@@ -312,6 +312,7 @@ DirectXMath, GLM, Vectormath를 같은 하니스로 측정한 결과다. 절대 
 - [PLAN.md](docs/PLAN.md) — 설계 결정, Phase 이력, 현재 릴리스 판정
 - [BASELINE.md](docs/BASELINE.md) — 성능 기준선과 재현 절차
 - [SPIKE-RESULTS.md](docs/SPIKE-RESULTS.md) — constexpr·SIMD 코드 생성 검증
+- [OPEN-ISSUES.md](docs/OPEN-ISSUES.md) — 닫히지 않은 문제와 각각에서 배제된 원인
 
 ## 라이선스
 
