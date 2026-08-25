@@ -757,3 +757,18 @@ scripts\check_performance.ps1 -BenchmarkExe "$env:LOCALAPPDATA\MathematicsBuild\
 
 GLM과 Vectormath는 `-D MATHEMATICS_BENCH_GLM=OFF` / `-D MATHEMATICS_BENCH_VECTORMATH=OFF`로 뺄 수 있다.
 둘 다 부가 참고 대상이며, 릴리스를 막는 것은 DirectXMath 대비 수치뿐이다.
+
+README의 도표는 손으로 옮겨 적지 않는다. 두 컴파일러의 JSON을 그대로 먹여 다시 만든다 —
+막대와 그 캡션이 같은 median에서 계산되므로 설명이 그림과 어긋날 수 없다. **§8이 기록한
+예열을 먼저 돌려야 한다.**
+
+```powershell
+$bench = "$env:LOCALAPPDATA\MathematicsBuild\msvc-release\bench\mathematics_bench.exe"
+& $bench --benchmark_filter=bm_mathematics_mul_add_throughput --benchmark_min_time=2s
+& $bench --benchmark_min_time=0.4s --benchmark_repetitions=9 --benchmark_enable_random_interleaving=true --benchmark_report_aggregates_only=true --benchmark_out_format=json --benchmark_out="$env:TEMP\msvc.json"
+scripts\make_performance_chart.ps1 -MsvcJson "$env:TEMP\msvc.json" -ClangJson "$env:TEMP\clang.json"
+```
+
+clang-cl 쪽도 같은 두 줄을 `clang-release` 빌드로 돌려 `clang.json`을 만든다. 스크립트는
+쓰인 수치를 전부 표준 출력에 찍으므로 JSON과 대조할 수 있고, 새 도구를 요구하지 않는다 —
+페이지가 `--dump-dom`으로 자기 높이를 알려주므로 캡처를 정확한 크기로 뜨고 자를 필요가 없다.
