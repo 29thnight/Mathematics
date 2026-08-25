@@ -15,7 +15,7 @@ target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
 #include <mathematics/transform.hpp>
 ```
 
-`mathematics/format.hpp`만 우산 헤더에서 빠져 있다. `<format>`은 무겁고, 출력하지 않는
+`mathematics/format.hpp`만 우산 헤더에서 빠져 있다. `<format>`은 무겁다. 출력하지 않는
 번역 단위까지 그 비용을 물릴 이유가 없다.
 
 ---
@@ -136,7 +136,7 @@ static_assert(math::inverse(math::matrix4x4::identity()) ==
 opaque black이다.
 
 `rect`는 float `x/y/width/height`를 저장한다. 점 포함은 최소 변을 포함하고 최대 변은
-제외하는 half-open 규칙이며, 변만 맞닿은 두 rect는 면적이 없으므로 교차하지 않는다.
+제외하는 half-open 규칙이다. 변만 맞닿은 두 rect는 면적이 없으므로 교차하지 않는다.
 음수 크기는 자동으로 숨기지 않고 `normalized(rect)`로 명시적으로 바로잡는다.
 
 ### bounding_frustum
@@ -156,7 +156,7 @@ const auto planes = math::frustum_planes(frustum); // 내부는 전부 <= 0
 
 표현은 DirectXCollision의 `BoundingFrustum`과 같다: origin, orientation,
 right/left/top/bottom slope, near/far 순서다. LH와 RH 생성은
-`bounding_frustum_from_projection_lh/rh`로 분리했고, 특이 투영을 구분해야 하면
+`bounding_frustum_from_projection_lh/rh`로 분리했다. 특이 투영을 구분해야 하면
 `try_bounding_frustum_from_projection_lh/rh`를 쓴다. 구는 면·모서리·꼭짓점까지,
 AABB와 frustum 쌍은 face normal과 edge cross axis까지 검사하므로 6개 평면만 보는
 보수적 컬링 테스트가 아니라 정밀 교차다.
@@ -182,7 +182,7 @@ const math::aabb world_bounds = math::transform(a, world);
 ```
 
 `transform(aabb, matrix4x4)`는 affine 행렬의 이동·회전·비균등/음수 스케일·shear를
-적용한 뒤 결과를 다시 축 정렬한 가장 작은 AABB를 반환한다. 중심은 점으로 변환하고,
+적용한 뒤 그 결과를 다시 축 정렬해 가장 작은 AABB를 반환한다. 중심은 점으로 변환하고
 extents는 행렬 선형부의 절댓값으로 투영한다. 이는 8개 코너를 변환하는
 `DirectX::BoundingBox::Transform`과 같은 결과지만 perspective 행렬은 계약 밖이다.
 DirectX와 같은 uniform `scale, rotation, translation` 오버로드도 제공한다.
@@ -237,7 +237,7 @@ auto&& [x, y, z, w] = math::components(color);
 auto&& [row0, row1, row2, row3] = math::rows(world);
 ```
 
-바인딩은 원본을 참조하므로 쓰기가 그대로 관통하고, 상수평가에서도 동작한다. C++23의
+바인딩은 원본을 참조하므로 쓰기가 그대로 관통하고 상수평가에서도 동작한다. C++23의
 `tuple-like` 개념은 표준 튜플 타입만 인정하므로 `std::apply`에는 넣을 수 없다 —
 일반 코드에서는 `math::ranges::get<I>(view)`를 쓴다.
 
@@ -253,7 +253,7 @@ callback 호출 순서와 부작용을 보존해야 하므로 fixed terminal도 
 것은 아니다. SIMD가 중요한 전용 산술은 기존 벡터 연산을 우선한다.
 
 C++23 표준 라이브러리에 `std::mdspan`이 있으면 `<mathematics/mdspan.hpp>`가 고정
-extent 2차원 view를 제공한다. `as_mdspan`은 `m[row][column]`과 같은 매핑이고,
+extent 2차원 view를 제공한다. `as_mdspan`은 `m[row][column]`과 같은 매핑이고
 `transpose_view`는 복사 없이 두 인덱스만 뒤집는다.
 
 ```cpp
@@ -267,7 +267,7 @@ transposed[1, 2] = 4.0f;           // world.m[2][1]
 ```
 
 이 view들은 수명도 늘리지 않고 데이터를 소유하지도 않는다. 행렬 연산 자체는 기존
-`matrix4x4`/SIMD API를 사용하고, view는 검사·직렬화·범용 알고리즘 연결에 사용한다.
+`matrix4x4`/SIMD API를 사용하고 view는 검사·직렬화·범용 알고리즘 연결에 사용한다.
 
 ---
 
@@ -320,13 +320,13 @@ raycast(r, a, d)  -> bool + float  맞는가, 얼마나 멀리
 ## 6. 성능을 위해 알아둘 것
 
 - **핫 루프는 `vec_reg`로.** `vector3`는 12바이트 패킹이라 함수 경계를 넘을 때
-  적재/저장이 생긴다. 인라인되는 표현식 안에서는 문제없지만, 인라인되지 않는
+  적재/저장이 생긴다. 인라인되는 표현식 안에서는 문제없지만 인라인되지 않는
   경계를 넘나든다면 `mathematics/vec_reg.hpp`의 레지스터 타입을 직접 쓴다.
 - **C++23으로 빌드하라.** MSVC에서 C++20으로 빌드하면 최대 2배 느려진다 —
   `if consteval`이 없으면 컴파일 타임 분기가 런타임 표현을 오염시킨다.
   빌드 시 경고가 나온다.
 - **`/fp:fast`는 벤치용, `/fp:precise`는 테스트용.** 프로젝트가 그렇게 나눠
-  쓴다. `normalize_unchecked`는 정확한 제곱근을 유지하고 입력 검사만 생략하며,
+  쓴다. `normalize_unchecked`는 정확한 제곱근을 유지하고 입력 검사만 생략한다.
   `_est` 접미사 함수(`normalize_est` 등)는 정밀도를 속도와 맞바꾼다.
 - **view는 연결 API다.** `components`와 `rows`는 generic range 코드에 편리하지만
   행렬 핫 루프에서는 직접 멤버 접근과 기존 SIMD 연산을 쓴다. `as_mdspan`과

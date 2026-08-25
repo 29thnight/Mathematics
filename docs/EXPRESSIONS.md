@@ -6,7 +6,7 @@
 
 ## 시작하기
 
-대부분의 코드에서는 우산 헤더 하나로 전체 API를 사용할 수 있다.
+대부분의 코드에서는 우산 헤더 하나면 전체 API가 들어온다.
 
 ```cpp
 #include <mathematics/mathematics.hpp>
@@ -46,12 +46,12 @@ target_compile_features(my_game PRIVATE cxx_std_20)
 | `near_equal(a, b, epsilon)` | 호출자가 허용 오차를 정하는 근사 비교 |
 | `radians(60.0f)` | 도를 라디안으로 변환. 각도 API는 라디안을 받는다 |
 
-행렬은 row-major로 저장하며 `m[row][column]`으로 접근한다. 이동 성분은 마지막 열이
-아니라 `matrix4x4`의 3행에 있다. 투영 행렬의 깊이 범위는 Direct3D 방식인 `[0, 1]`이다.
+행렬은 row-major로 저장하며 `m[row][column]`으로 접근한다. 이동 성분은 마지막 열이 아니라
+`matrix4x4`의 3행에 들어 있고 투영 행렬의 깊이 범위는 Direct3D 방식인 `[0, 1]`이다.
 
 ## 한눈에 보는 실전 표현식
 
-다음은 자주 쓰는 의도를 Mathematics 표현식으로 옮긴 예다.
+자주 쓰는 의도부터 Mathematics 표현식으로 옮겨 본다.
 
 ```cpp
 // 프레임 이동
@@ -84,14 +84,14 @@ const vector3 world_position = math::transform_point(local_position, world);
 const vector3 world_forward = math::transform_direction(local_forward, world);
 ```
 
-`normalize(0 벡터)`는 0 벡터를 반환한다. `normalize_unchecked`는 정확한 제곱근을
-사용하면서 0·비유한 입력 검사를 생략하므로, 길이제곱이 유한하고 0보다 큰 벡터임을
-보장할 수 있는 핫 패스에서 쓴다. `normalize_est`는 같은 입력 전제에 더해 근사 역제곱근으로
-정밀도를 속도와 맞바꾼다.
+`normalize(0 벡터)`는 0 벡터를 반환한다. `normalize_unchecked`는 정확한 제곱근을 쓰되
+0·비유한 입력 검사를 생략한다. 그래서 길이제곱이 유한하고 0보다 큰 벡터임을 보장할 수 있는
+핫 패스에서 쓴다. `normalize_est`는 같은 입력 전제에 더해 근사 역제곱근으로 정밀도를
+속도와 맞바꾼다.
 
 ## 스칼라와 각도
 
-`scalar.hpp`는 C++20에서도 상수 평가할 수 있는 각도 변환과 삼각함수를 제공한다.
+`scalar.hpp`에는 C++20에서도 상수 평가할 수 있는 각도 변환과 삼각함수가 들어 있다.
 
 ```cpp
 constexpr float fov = math::radians(60.0f);
@@ -108,8 +108,8 @@ math::sin_cos(fov, sine, cosine); // 두 값이 모두 필요할 때 한 번에 
 ```
 
 제공 함수는 `sin`, `cos`, `sin_cos`, `tan`, `asin`, `acos`, `atan`, `atan2`다.
-상수는 `pi`, `two_pi`, `half_pi`, `quarter_pi`, `inv_pi`, `inv_two_pi`를 제공한다.
-`radians`와 `degrees`는 표현식 경계에서 단위를 드러내는 데 사용한다.
+상수로는 `pi`, `two_pi`, `half_pi`, `quarter_pi`, `inv_pi`, `inv_two_pi`가 있다.
+`radians`와 `degrees`는 표현식 경계에서 단위를 드러내는 데 쓴다.
 
 ```cpp
 const float yaw_radians = math::radians(yaw_degrees);
@@ -120,7 +120,7 @@ const float displayed_degrees = math::degrees(yaw_radians);
 
 ### 생성, 접근, 분해
 
-`vector2`, `vector3`, `vector4`는 패킹된 공개 멤버 타입이다. 0, 1, 단위 축 생성자와
+`vector2`, `vector3`, `vector4`는 패킹된 공개 멤버 타입으로 0, 1, 단위 축 생성자와
 인덱스 접근, 구조적 바인딩을 지원한다.
 
 ```cpp
@@ -152,7 +152,7 @@ const vector3 unit_range = math::saturate(value);
 const vector3 blended = math::lerp(a, b, t);
 ```
 
-`lerp(a, b, t)`는 `t`를 자동으로 `[0, 1]`에 제한하지 않는다. 외삽을 막아야 한다면
+`lerp(a, b, t)`는 `t`를 자동으로 `[0, 1]`에 제한하지 않으므로 외삽을 막아야 한다면
 호출부에서 `t`를 제한한다.
 
 ```cpp
@@ -173,7 +173,7 @@ const vector3 unit_direction = math::normalize(to_target);
 const vector3 face_normal = math::normalize(math::cross(edge_a, edge_b));
 ```
 
-2D의 `cross`는 3D 외적의 Z 성분에 해당하는 스칼라를 반환한다. 부호로 회전 방향이나
+2D의 `cross`는 3D 외적의 Z 성분에 해당하는 스칼라를 반환하며 그 부호로 회전 방향이나
 점의 선분 좌우를 판정할 수 있다.
 
 ```cpp
@@ -182,8 +182,8 @@ const bool is_left = turn > 0.0f;
 const vector2 left_normal = math::perpendicular(edge); // 반시계 90도 회전
 ```
 
-`reflect`는 단위 법선을 전제로 하고, `refract`에는 단위 입사 방향과 단위 법선을
-사용한다. `refract`에서 전반사가 발생하면 0 벡터를 반환한다.
+`reflect`는 단위 법선을 전제로 하고 `refract`에는 단위 입사 방향과 단위 법선을 쓴다.
+`refract`에서 전반사가 발생하면 0 벡터를 반환한다.
 
 ### 비교
 
@@ -209,8 +209,8 @@ const matrix4x4 translation_m = math::translation_matrix(vector3{10, 0, 5});
 const matrix4x4 rotation_m = math::rotation_y(math::radians(45.0f));
 ```
 
-`rotation_x`, `rotation_y`, `rotation_z`는 각 축 회전 행렬을 만든다. 여러 변환은 실제
-적용 순서대로 왼쪽에서 오른쪽으로 쓴다.
+`rotation_x`, `rotation_y`, `rotation_z`는 각 축 회전 행렬을 만든다. 변환을 여러 개 이을
+때는 실제 적용 순서대로 왼쪽에서 오른쪽으로 쓴다.
 
 ```cpp
 // 점에 크기, 회전, 이동을 차례대로 적용한다.
@@ -220,8 +220,8 @@ const matrix4x4 world = scale_m * rotation_m * translation_m;
 const matrix4x4 composed = math::compose(scale, rotation, translation);
 ```
 
-`compose`로 만든 행렬은 다시 TRS로 분해할 수 있다. 분해할 수 없는 행렬이면 `false`를
-반환하고 출력 인자는 바꾸지 않는다.
+`compose`로 만든 행렬은 다시 TRS로 분해할 수 있고 분해할 수 없는 행렬이면 `false`를
+반환하며 출력 인자는 그대로 둔다.
 
 ```cpp
 vector3 recovered_scale;
@@ -244,7 +244,7 @@ const vector4 clip = vector4{local_position.x, local_position.y,
 ```
 
 위치에는 이동이 적용되지만 방향에는 적용되지 않는다. 비균등 스케일이 포함된 행렬로
-법선을 변환할 때는 역전치 행렬을 사용한다.
+법선을 변환할 때는 역전치 행렬을 쓴다.
 
 ```cpp
 const matrix4x4 normal_matrix = math::transpose(math::inverse(world));
@@ -268,7 +268,7 @@ const vector3 translation = world.translation();
 const float element = world(2, 1);
 ```
 
-특이하거나 비유한 행렬의 `inverse`는 항등행렬을 반환한다. 역행렬 존재 여부 자체가
+특이하거나 비유한 행렬의 `inverse`는 항등행렬을 반환하므로 역행렬 존재 여부 자체가
 중요한 코드에서는 먼저 `determinant`를 검사한다.
 
 ## 쿼터니언 회전
@@ -301,7 +301,7 @@ const vector3 same = math::rotate(
 const vector3 local_again = math::inverse_rotate(rotated, combined);
 ```
 
-보간과 변환도 제공한다.
+보간과 변환도 함께 들어 있다.
 
 ```cpp
 const quaternion smooth = math::slerp(start, end, t);
@@ -319,8 +319,8 @@ float angle = 0.0f;
 math::to_axis_angle(rotation, axis, angle);
 ```
 
-`q`와 `-q`는 값은 다르지만 같은 회전을 나타낸다. 회전 동등성을 검사할 때는
-`near_equal` 대신 `same_rotation`을 사용한다.
+`q`와 `-q`는 값은 다르지만 같은 회전을 나타내므로 회전 동등성을 검사할 때는
+`near_equal`이 아니라 `same_rotation`을 쓴다.
 
 ```cpp
 const bool equivalent = math::same_rotation(q, -q);
@@ -328,8 +328,8 @@ const bool equivalent = math::same_rotation(q, -q);
 
 ## 카메라와 투영
 
-손잡이는 함수 이름에서 반드시 선택한다. 다음 예는 왼손 좌표계와 Direct3D 깊이 범위를
-사용한다.
+손잡이는 함수 이름에서 반드시 선택한다. 아래 예는 왼손 좌표계와 Direct3D 깊이 범위를
+쓴다.
 
 ```cpp
 const matrix4x4 view = math::look_at_lh(
@@ -346,7 +346,7 @@ const vector4 clip = local_vertex * world_view_projection;
 const vector3 ndc{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
 ```
 
-사용 가능한 카메라·투영 생성 함수는 다음과 같다.
+카메라와 투영을 만드는 함수는 아래 표가 전부다.
 
 | 목적 | 왼손 좌표계 | 오른손 좌표계 |
 |------|-------------|---------------|
@@ -383,8 +383,8 @@ const math::sphere enclosing_sphere = math::bounding_sphere(bounds);
 const vector3 nearest = math::closest_point(bounds, query_point);
 ```
 
-연속 메모리의 점 배열이 있다면 `aabb_from_points(points, count)`로 한 번에 경계를 만들 수
-있다. 구를 감싸는 AABB는 `bounding_box(sphere)`로 만든다.
+연속 메모리의 점 배열이 있다면 `aabb_from_points(points, count)`로 한 번에 경계를 만들 수 있다.
+구를 감싸는 AABB는 `bounding_box(sphere)`로 만든다.
 
 ### 교차와 포함
 
@@ -404,7 +404,7 @@ case math::containment::contains:
 ```
 
 `contains(outer, inner)`는 비대칭이다. 결과는 두 인자가 떨어짐, 일부 겹침, 두 번째 인자가
-첫 번째 인자에 완전히 포함됨을 뜻한다. 경계에 정확히 닿는 경우는 교차로 센다.
+첫 번째 인자에 완전히 포함됨을 뜻하고 경계에 정확히 닿는 경우는 교차로 센다.
 
 ### 평면
 
@@ -425,7 +425,7 @@ const math::plane reversed = math::flip(triangle_plane);
 네 실수 생성자는 자동 정규화하지 않는다. 행렬에서 직접 추출한 평면에는
 `math::normalize(plane)`을 적용해야 `signed_distance`가 실제 거리 단위가 된다.
 
-구나 AABB 전체가 평면의 어느 쪽에 있는지는 `classify(volume, plane)`으로 검사한다.
+구나 AABB 전체가 평면의 어느 쪽에 있는지는 `classify(volume, plane)`으로 검사하며
 결과는 `plane_side::front`, `back`, `straddling` 중 하나다.
 
 ### 레이캐스트
@@ -440,11 +440,11 @@ if (math::raycast(pick_ray, bounds, hit_distance)) {
 }
 ```
 
-`raycast`는 `sphere`, `aabb`, `plane` 오버로드를 제공하고 삼각형에는
-`raycast_triangle(ray, v0, v1, v2, distance)`를 사용한다. 레이는 반직선이므로 원점 뒤의
+`raycast`에는 `sphere`, `aabb`, `plane` 오버로드가 있고 삼각형에는
+`raycast_triangle(ray, v0, v1, v2, distance)`를 쓴다. 레이는 반직선이므로 원점 뒤의
 교점은 적중이 아니다. 원점이 도형 안에 있으면 거리는 0이다.
 
-방향을 정규화한 레이의 결과는 실제 거리다. 정규화하지 않았다면 결과는
+방향을 정규화한 레이의 결과는 실제 거리이고 정규화하지 않았다면 결과는
 `origin + direction * t`의 매개변수 `t`다.
 
 ## 컴파일 타임 표현식
@@ -466,7 +466,7 @@ static_assert(math::inverse(identity) == identity);
 ```
 
 컴파일 타임과 런타임의 부동소수점 결과는 컴파일러의 FMA 결합 때문에 극소수 ULP만큼
-다를 수 있다. 두 경로의 결과를 비교할 때도 `near_equal`을 사용한다.
+다를 수 있으므로 두 경로의 결과를 비교할 때도 `near_equal`을 쓴다.
 
 ## 구조적 바인딩과 출력
 
@@ -481,7 +481,7 @@ const auto [center, radius] = math::sphere{position, 5.0f};
 const auto [origin, direction] = math::ray{};
 ```
 
-표준 라이브러리가 `<format>`을 지원하는 환경에서는 `format.hpp`를 포함한 뒤 모든 주요
+표준 라이브러리가 `<format>`을 지원하는 환경이라면 `format.hpp`를 포함한 뒤 모든 주요
 저장 타입을 출력할 수 있다. 실수 포맷 지정자는 각 성분에 전달된다.
 
 ```cpp
@@ -495,7 +495,7 @@ const std::string box_text = std::format("{}", bounds);
 // aabb(min=(...), max=(...)) 또는 aabb(empty)
 ```
 
-행렬은 저장 규약 그대로 한 행씩 출력되며, 쿼터니언은 `(x, y, z, w)` 순서로 출력된다.
+행렬은 저장 규약 그대로 한 행씩 출력되며 쿼터니언은 `(x, y, z, w)` 순서로 출력된다.
 
 ## 기능별 헤더
 
