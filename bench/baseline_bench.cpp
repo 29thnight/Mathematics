@@ -2248,4 +2248,163 @@ static void bm_fixed_ranges_rows_fold(benchmark::State& state) {
 }
 BENCHMARK(bm_fixed_ranges_rows_fold);
 
+// ================================== fixed ranges: the shape callers actually write
+// The family above measures one object, over and over. That shape hides the
+// cost the API is actually asked about, because in it nothing vectorizes --
+// not even the hand-written control -- and the whole family lands within the
+// noise the alignment note describes.
+//
+// A batch loop separates them, and it does so structurally rather than by a
+// margin. MSVC leaves the range-for as a four-trip inner loop over ONE float,
+// and an inner loop stops it unrolling the outer loop as well; fold_fixed
+// expands and the outer loop then unrolls eight wide with packed loads, which
+// is the same innermost loop the hand-written control gets. Counted off this
+// binary's own disassembly: direct 74 instructions per eight vector4 with
+// sixteen packed operations, fold_fixed 82 with the same sixteen, range-for
+// four instructions per single float and none.
+//
+// bm_fixed_ranges_batch_structured_sum is here to be watched, not quoted. It
+// forms no loop either -- two backward branches, same as direct -- but in THIS
+// translation unit MSVC gave it scalar loads (thirty-two vmovss, no vmovups)
+// where it gave direct and fold_fixed packed ones, and that alone is the gap
+// its number shows. Compiled on its own with the same harness around it, it is
+// instruction-for-instruction identical to fold_fixed. The choice belongs to
+// whole-translation-unit heuristics, so treat that row as unexplained rather
+// than as a property of structured bindings. docs/BASELINE.md 9 keeps it open.
+//
+// All six accumulate a per-element subtotal and add THAT to the running total,
+// the same dependency structure as the hand-written control. Threading the
+// running total through fold_fixed instead would have made the fold variants
+// four serial adds deep per element, and the family would have measured a
+// dependency chain rather than the code shape it is here to compare.
+//
+// scripts/check_codegen.ps1 gates that structure directly. These benchmarks
+// exist to price it.
+namespace {
+
+constexpr int vector4_batch_size = 512;
+
+const std::vector<math::vector4>& vector4_batch_data() {
+    static const std::vector<math::vector4> data = [] {
+        std::mt19937 rng(random_seed);
+        std::uniform_real_distribution<float> dist(-100.0f, 100.0f);
+        std::vector<math::vector4> out(vector4_batch_size);
+        for (auto& v : out) {
+            v = math::vector4{dist(rng), dist(rng), dist(rng), dist(rng)};
+        }
+        return out;
+    }();
+    return data;
+}
+
+// All four component variants read the same addresses, for the same reason the
+// throughput families do.
+stream_arena<1>& vector4_batch_arena() {
+    static auto instance = make_arena(
+        arena_region{vector4_batch_data().data(),
+                     vector4_batch_size * sizeof(math::vector4)});
+    return instance;
+}
+
+stream_arena<1>& matrix_batch_arena() {
+    static auto instance = make_arena(
+        arena_region{matrix_data().data(), matrix_stream_bytes});
+    return instance;
+}
+
+} // namespace
+
+static void bm_fixed_ranges_batch_direct_sum(benchmark::State& state) {
+    const auto* data = vector4_batch_arena().as<const math::vector4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < vector4_batch_size; ++i) {
+            total += data[i].x + data[i].y + data[i].z + data[i].w;
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * vector4_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_direct_sum);
+
+static void bm_fixed_ranges_batch_view_sum(benchmark::State& state) {
+    const auto* data = vector4_batch_arena().as<const math::vector4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < vector4_batch_size; ++i) {
+            float element = 0.0f;
+            for (const float component : math::components(data[i])) {
+                element += component;
+            }
+            total += element;
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * vector4_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_view_sum);
+
+static void bm_fixed_ranges_batch_fold_sum(benchmark::State& state) {
+    const auto* data = vector4_batch_arena().as<const math::vector4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < vector4_batch_size; ++i) {
+            total += math::ranges::fold_fixed(math::components(data[i]),
+                                              0.0f, std::plus<>{});
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * vector4_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_fold_sum);
+
+static void bm_fixed_ranges_batch_structured_sum(benchmark::State& state) {
+    const auto* data = vector4_batch_arena().as<const math::vector4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < vector4_batch_size; ++i) {
+            auto&& [x, y, z, w] = math::components(data[i]);
+            total += x + y + z + w;
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * vector4_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_structured_sum);
+
+static void bm_fixed_ranges_batch_rows_view_sum(benchmark::State& state) {
+    const auto* data = matrix_batch_arena().as<const math::matrix4x4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < matrix_batch_size; ++i) {
+            float element = 0.0f;
+            for (const auto row : math::rows(data[i])) {
+                for (const float value : row) element += value;
+            }
+            total += element;
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * matrix_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_rows_view_sum);
+
+static void bm_fixed_ranges_batch_rows_fold_sum(benchmark::State& state) {
+    const auto* data = matrix_batch_arena().as<const math::matrix4x4>(0);
+    for (auto _ : state) {
+        float total = 0.0f;
+        for (int i = 0; i < matrix_batch_size; ++i) {
+            total += math::ranges::fold_fixed(
+                math::rows(data[i]), 0.0f,
+                [](float accumulated, std::span<const float, 4> row) {
+                    return math::ranges::fold_fixed(row, accumulated,
+                                                    std::plus<>{});
+                });
+        }
+        benchmark::DoNotOptimize(total);
+    }
+    state.SetItemsProcessed(state.iterations() * matrix_batch_size);
+}
+BENCHMARK(bm_fixed_ranges_batch_rows_fold_sum);
+
 BENCHMARK_MAIN();
