@@ -44,7 +44,19 @@ struct vector3 {
 
     MATHEMATICS_NODISCARD MATHEMATICS_INLINE static constexpr vector3
     from_reg(vec_reg r) noexcept {
+        MATHEMATICS_IF_CONSTEVAL { return vector3{get_x(r), get_y(r), get_z(r)}; }
+#if MATHEMATICS_SIMD_SSE
+        // Three lane reads is what the constant-evaluated path has to say, but
+        // it is not what the object should be written with: see store3. The
+        // local survives the return -- the caller's destination is what MSVC
+        // ends up storing into -- so this is one 8-byte store and one fused
+        // extract-store, not a build followed by a copy.
+        vector3 result;
+        store3(&result, r);
+        return result;
+#else
         return vector3{get_x(r), get_y(r), get_z(r)};
+#endif
     }
 
     // ------------------------------------------------------------- lane access

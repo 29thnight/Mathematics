@@ -123,6 +123,30 @@ MATHEMATICS_INLINE void MATHEMATICS_CALL store_aligned(float* p, vec_reg a) noex
     _mm_store_ps(p, a.v);
 }
 
+// The mirror of load3, and the same 8+4 split for the same reason. Writing the
+// three lanes as three scalars instead costs two extra shuffles per store,
+// because x is the only lane a scalar store can reach without one. MSVC does
+// exactly that when a vector3 is built lane by lane, and on a machine whose
+// shuffle ports are the bottleneck -- cross issues four of them already -- those
+// two are a quarter of the loop. Clang folds the lane-wise form into this shape
+// on its own; MSVC does not, and cannot be talked into it from the value side.
+MATHEMATICS_INLINE void MATHEMATICS_CALL store3(void* object, vec_reg a) noexcept {
+    auto* const bytes = static_cast<unsigned char*>(object);
+    // __m128i* is a may-alias type in every backend that defines it, and z goes
+    // through a float* to a float member, so neither write needs a memcpy to
+    // stay clear of TBAA. _mm_store_sd would be the obvious spelling of the
+    // first one and is the wrong one: GCC's emmintrin.h implements it as a
+    // plain store through double*, which these three floats are not.
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(bytes), _mm_castps_si128(a.v));
+#if MATHEMATICS_HAS_SSE4
+    const int z_bits = _mm_extract_ps(a.v, 2);
+    std::memcpy(bytes + 8, &z_bits, sizeof(z_bits));
+#else
+    _mm_store_ss(reinterpret_cast<float*>(bytes + 8),
+                 _mm_shuffle_ps(a.v, a.v, _MM_SHUFFLE(2, 2, 2, 2)));
+#endif
+}
+
 // ------------------------------------------------------------------- arithmetic
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vec_reg MATHEMATICS_CALL
 add(vec_reg a, vec_reg b) noexcept {
