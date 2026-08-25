@@ -15,6 +15,9 @@
 - **릴리스 판정:** 미통과. `cross`/전치/쿼터니언 곱 회귀와 80% line coverage
   자동화는 닫혔지만 clang-cl `matrix4x4` 곱 처리량과 전체 성능 표의 CI 자동화가
   남아 있다. 기능 Phase의 완료와 릴리스 게이트 통과를 같은 말로 사용하지 않는다.
+  게이트가 열린 채로 [v0.1.0](https://github.com/29thnight/Mathematics/releases/tag/v0.1.0)을
+  pre-release로 배포했다 (2026-08-25). 배포본이 있다는 것과 게이트를 통과했다는
+  것도 같은 말이 아니며, 릴리스 노트에 열린 항목을 그대로 적었다.
 - **자동 게이트:** MSVC·clang-cl에서 수정된 5개 latency/throughput 비교를 DXMath 대비
   5%로 강제한다. GCC/gcovr에서는 x86 활성 `include/mathematics` line coverage 80%를
   강제한다. scalar/SSE2/NEON은 별도 correctness matrix가 담당하며 coverage 합산
