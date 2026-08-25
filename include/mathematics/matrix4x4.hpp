@@ -34,6 +34,7 @@ private:
     explicit matrix4x4(uninitialized_tag) noexcept {}
 
     friend constexpr matrix4x4 transpose(const matrix4x4& mat) noexcept;
+    friend constexpr matrix4x4 inverse(const matrix4x4& mat) noexcept;
 
 public:
     float m[4][4];
@@ -353,8 +354,19 @@ struct minors4x4 {
 // (adj * M)[0][0] is the determinant by definition, and column 0 of M is row 0
 // of the transpose, which this already has.
 #if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_NEON
+// The kernel below appears twice -- here feeding inverse() through vec_reg
+// references, and in try_inverse_simd fused with its matrix out-parameter.
+// The duplication is deliberate; keep the two bodies in sync. Every factoring
+// that shared one kernel between the two consumers lost measured throughput:
+// an aggregate return of the four rows cost MSVC 42% of try_inverse, vec_reg
+// reference out-parameters still cost it 20%, and making inverse() a wrapper
+// over try_inverse_simd (the original sharing attempt) cost clang 23% of
+// inverse(). Each caller needs the arithmetic fused with its own sink.
+//
+// The rows are written only on the true return.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE bool
-try_inverse_simd(const matrix4x4& mat, matrix4x4& result) noexcept {
+inverse_rows_simd(const matrix4x4& mat, vec_reg& row0, vec_reg& row1,
+                  vec_reg& row2, vec_reg& row3) noexcept {
     const vec_reg r0 = mat.row(0);
     const vec_reg r1 = mat.row(1);
     const vec_reg r2 = mat.row(2);
@@ -413,6 +425,65 @@ try_inverse_simd(const matrix4x4& mat, matrix4x4& result) noexcept {
     // reciprocal stays in vector registers. Extracting it to divide in scalar
     // and broadcasting the result back costs a round trip through the scalar
     // unit for no benefit.
+    const vec_reg det = dot4(adj0, t0);
+    if (!detail::is_finite_non_zero(get_x(det))) return false;
+
+    const vec_reg inv_det = div(splat(1.0f), det);
+    row0 = mul(adj0, inv_det);
+    row1 = mul(adj1, inv_det);
+    row2 = mul(adj2, inv_det);
+    row3 = mul(adj3, inv_det);
+    return true;
+}
+
+// Same kernel as inverse_rows_simd, fused with the matrix out-parameter; see
+// the duplication note above before touching either body.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE bool
+try_inverse_simd(const matrix4x4& mat, matrix4x4& result) noexcept {
+    const vec_reg r0 = mat.row(0);
+    const vec_reg r1 = mat.row(1);
+    const vec_reg r2 = mat.row(2);
+    const vec_reg r3 = mat.row(3);
+
+    const vec_reg s_a = sub(mul(shuffle<2, 1, 1, 0>(r0), shuffle<3, 3, 2, 3>(r1)),
+                          mul(shuffle<3, 3, 2, 3>(r0), shuffle<2, 1, 1, 0>(r1)));
+    const vec_reg s_b = sub(mul(shuffle<0, 0, 0, 0>(r0), shuffle<2, 1, 2, 1>(r1)),
+                          mul(shuffle<2, 1, 2, 1>(r0), shuffle<0, 0, 0, 0>(r1)));
+    const vec_reg c_a = sub(mul(shuffle<2, 1, 1, 0>(r2), shuffle<3, 3, 2, 3>(r3)),
+                          mul(shuffle<3, 3, 2, 3>(r2), shuffle<2, 1, 1, 0>(r3)));
+    const vec_reg c_b = sub(mul(shuffle<0, 0, 0, 0>(r2), shuffle<2, 1, 2, 1>(r3)),
+                          mul(shuffle<2, 1, 2, 1>(r2), shuffle<0, 0, 0, 0>(r3)));
+
+    const vec_reg k5 = shuffle<0, 0, 0, 0>(c_a, s_a);
+    const vec_reg k4 = shuffle<1, 1, 1, 1>(c_a, s_a);
+    const vec_reg k3 = shuffle<2, 2, 2, 2>(c_a, s_a);
+    const vec_reg k2 = shuffle<3, 3, 3, 3>(c_a, s_a);
+    const vec_reg k1 = shuffle<0, 0, 0, 0>(c_b, s_b);
+    const vec_reg k0 = shuffle<1, 1, 1, 1>(c_b, s_b);
+
+    const vec_reg lo01 = shuffle<0, 1, 0, 1>(r1, r0);
+    const vec_reg hi01 = shuffle<2, 3, 2, 3>(r1, r0);
+    const vec_reg lo23 = shuffle<0, 1, 0, 1>(r3, r2);
+    const vec_reg hi23 = shuffle<2, 3, 2, 3>(r3, r2);
+
+    const vec_reg p0 = shuffle<0, 2, 0, 2>(lo01, lo23);
+    const vec_reg p1 = shuffle<1, 3, 1, 3>(lo01, lo23);
+    const vec_reg p2 = shuffle<0, 2, 0, 2>(hi01, hi23);
+    const vec_reg p3 = shuffle<1, 3, 1, 3>(hi01, hi23);
+    const vec_reg t0 = shuffle<2, 0, 2, 0>(lo01, lo23);
+
+    const vec_reg flip_odd = make_mask_reg(0, sign_bit, 0, sign_bit);
+    const vec_reg flip_even = make_mask_reg(sign_bit, 0, sign_bit, 0);
+
+    const vec_reg adj0 =
+        bit_xor(mul_add(p3, k3, neg_mul_add(p2, k4, mul(p1, k5))), flip_odd);
+    const vec_reg adj1 =
+        bit_xor(mul_add(p3, k1, neg_mul_add(p2, k2, mul(p0, k5))), flip_even);
+    const vec_reg adj2 =
+        bit_xor(mul_add(p3, k0, neg_mul_add(p1, k2, mul(p0, k4))), flip_odd);
+    const vec_reg adj3 =
+        bit_xor(mul_add(p2, k0, neg_mul_add(p1, k1, mul(p0, k3))), flip_even);
+
     const vec_reg det = dot4(adj0, t0);
     if (!detail::is_finite_non_zero(get_x(det))) return false;
 
@@ -555,9 +626,20 @@ try_inverse(const matrix4x4& mat) noexcept {
 
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr matrix4x4
 inverse(const matrix4x4& mat) noexcept {
-    matrix4x4 result;
-    if (!detail::try_inverse_matrix4x4(mat, result)) return matrix4x4::identity();
-    return result;
+#if MATHEMATICS_SIMD_SSE || MATHEMATICS_SIMD_NEON
+    MATHEMATICS_IF_CONSTEVAL { return detail::inverse_scalar(mat); }
+    // The success path must build the return value directly from registers.
+    // Routing it through a zero-initialized local, a matrix out-parameter, and
+    // a two-object return cost clang 23% of inverse() throughput while the
+    // same arithmetic in try_inverse() kept full speed.
+    vec_reg row0, row1, row2, row3;
+    if (!detail::inverse_rows_simd(mat, row0, row1, row2, row3)) {
+        return matrix4x4::identity();
+    }
+    return matrix4x4::from_rows_runtime(row0, row1, row2, row3);
+#else
+    return detail::inverse_scalar(mat);
+#endif
 }
 
 // ------------------------------------------------------------------ comparison
