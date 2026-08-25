@@ -7,6 +7,7 @@
 #include <functional>
 #include <ranges>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -41,6 +42,18 @@ static_assert(math::ranges::static_extent_v<transformed_component_range> == 4);
 static_assert(std::same_as<
               std::ranges::range_reference_t<transformed_component_range>,
               float>);
+
+// with_static_extent over a plain range carries no accessor, so it has no
+// member get<I>(). The tuple protocol still has to reach it, through the free
+// get<I> that falls back to indexing the wrapped range.
+using wrapped_span_range =
+    decltype(math::ranges::with_static_extent<4>(std::declval<std::span<float, 4>&>()));
+
+static_assert(std::tuple_size_v<wrapped_span_range> == 4);
+static_assert(std::same_as<std::tuple_element_t<2, wrapped_span_range>, float>);
+static_assert(std::tuple_size_v<transformed_component_range> == 4);
+static_assert(
+    std::same_as<std::tuple_element_t<0, transformed_component_range>, float>);
 
 struct counter {
     int calls = 0;
@@ -206,4 +219,17 @@ TEST(fixed_range_pipelines, terminal_closures_match_direct_calls) {
     EXPECT_EQ(result.calls, 3);
     EXPECT_EQ(output_end, output.end());
     EXPECT_EQ(output, (std::array<float, 3>{4, 9, 16}));
+}
+
+TEST(fixed_extent_view, tuple_protocol_reaches_a_range_without_an_accessor) {
+    std::array<float, 4> storage{1, 2, 3, 4};
+    std::span<float, 4> elements{storage};
+    auto view = math::ranges::with_static_extent<4>(elements);
+
+    auto&& [a, b, c, d] = view;
+    EXPECT_FLOAT_EQ(a, 1.0f);
+    EXPECT_FLOAT_EQ(d, 4.0f);
+
+    c = -3.0f;
+    EXPECT_FLOAT_EQ(storage[2], -3.0f);
 }

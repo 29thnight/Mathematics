@@ -29,6 +29,15 @@ namespace detail {
 
 struct no_fixed_accessor {};
 
+// Whether an accessor can name element `index` at compile time. A view without
+// one still answers get<index>() by indexing the wrapped range; both spellings
+// have to exist, because structured bindings pick the member get<> as soon as
+// the class declares any member named get and never fall back to a free one.
+template <typename accessor_type, std::size_t index>
+concept static_accessible = requires(accessor_type accessor) {
+    accessor(std::integral_constant<std::size_t, index>{});
+};
+
 // C++20 equivalent of the C++23 range-adaptor closure protocol. A closure can
 // produce another view or consume the range as a terminal operation.
 template <typename derived_type>
@@ -151,24 +160,30 @@ public:
         return extent_value;
     }
 
-    // Fixed algorithms prefer this path when an adapter can name an element at
-    // compile time. Regular iteration still delegates to the wrapped range.
+    // Fixed algorithms and structured bindings prefer this path: an accessor
+    // names the element at compile time where one exists, and the wrapped
+    // range is indexed where it does not. Regular iteration still delegates to
+    // the wrapped range's own iterator.
     template <std::size_t index>
-        requires (index < extent_value) &&
-                 requires(accessor_type& accessor) {
-                     accessor(std::integral_constant<std::size_t, index>{});
-                 }
+        requires (index < extent_value)
     MATHEMATICS_NODISCARD constexpr decltype(auto) get() {
-        return accessor_(std::integral_constant<std::size_t, index>{});
+        if constexpr (detail::static_accessible<accessor_type&, index>) {
+            return accessor_(std::integral_constant<std::size_t, index>{});
+        } else {
+            return std::ranges::begin(base_)[index];
+        }
     }
 
     template <std::size_t index>
         requires (index < extent_value) &&
-                 requires(const accessor_type& accessor) {
-                     accessor(std::integral_constant<std::size_t, index>{});
-                 }
+                 (detail::static_accessible<const accessor_type&, index> ||
+                  std::ranges::range<const base_type>)
     MATHEMATICS_NODISCARD constexpr decltype(auto) get() const {
-        return accessor_(std::integral_constant<std::size_t, index>{});
+        if constexpr (detail::static_accessible<const accessor_type&, index>) {
+            return accessor_(std::integral_constant<std::size_t, index>{});
+        } else {
+            return std::ranges::begin(base_)[index];
+        }
     }
 
 private:
@@ -389,7 +404,58 @@ struct transform_fixed_to_fn {
 
 inline constexpr transform_fixed_to_fn transform_fixed_to{};
 
+// The tuple protocol, so a fixed-extent range can be consumed without forming
+// a loop at all: `auto&& [x, y, z, w] = components(value);`. That matters on
+// MSVC, which does not unroll an iterator-driven loop nested inside another
+// loop -- any such loop, standard view or raw pointer alike (docs/BASELINE.md
+// section 9). Structured bindings prefer the member get<I>() where an accessor
+// supplies one; this free get is what std::apply and the fallback path use, and
+// fixed_element gives both the same element.
+template <std::size_t index, std::ranges::view base_type, std::size_t extent,
+          typename accessor_type>
+    requires (index < extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(fixed_extent_view<base_type, extent, accessor_type>& view) {
+    return detail::fixed_element<index>(view);
+}
+
+template <std::size_t index, std::ranges::view base_type, std::size_t extent,
+          typename accessor_type>
+    requires (index < extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(const fixed_extent_view<base_type, extent, accessor_type>& view) {
+    return detail::fixed_element<index>(view);
+}
+
+template <std::size_t index, std::ranges::view base_type, std::size_t extent,
+          typename accessor_type>
+    requires (index < extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(fixed_extent_view<base_type, extent, accessor_type>&& view) {
+    return detail::fixed_element<index>(view);
+}
+
 } // namespace math::ranges
+
+namespace std {
+
+template <ranges::view base_type, size_t extent, typename accessor_type>
+struct tuple_size<
+    math::ranges::fixed_extent_view<base_type, extent, accessor_type>>
+    : integral_constant<size_t, extent> {};
+
+template <size_t index, ranges::view base_type, size_t extent,
+          typename accessor_type>
+    requires (index < extent)
+struct tuple_element<
+    index, math::ranges::fixed_extent_view<base_type, extent, accessor_type>> {
+    using type = remove_reference_t<
+        decltype(math::ranges::detail::fixed_element<index>(
+            declval<math::ranges::fixed_extent_view<
+                base_type, extent, accessor_type>&>()))>;
+};
+
+} // namespace std
 
 namespace std::ranges {
 

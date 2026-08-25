@@ -16,6 +16,7 @@
 #include <iterator>
 #include <ranges>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -384,8 +385,59 @@ struct transform_fixed_fn {
 
 inline constexpr transform_fixed_fn transform_fixed{};
 
+// Same tuple protocol as fixed_extent_view, so a transformed fixed range can
+// also be bound instead of iterated: `auto [a, b] = view | transform_fixed(f);`
+template <std::size_t index, std::ranges::view base_type,
+          typename function_type>
+    requires (index < fixed_transform_view<base_type,
+                                           function_type>::static_extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(fixed_transform_view<base_type, function_type>& view) {
+    return ranges::detail::fixed_element<index>(view);
+}
+
+template <std::size_t index, std::ranges::view base_type,
+          typename function_type>
+    requires (index < fixed_transform_view<base_type,
+                                           function_type>::static_extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(const fixed_transform_view<base_type, function_type>& view) {
+    return ranges::detail::fixed_element<index>(view);
+}
+
+template <std::size_t index, std::ranges::view base_type,
+          typename function_type>
+    requires (index < fixed_transform_view<base_type,
+                                           function_type>::static_extent)
+MATHEMATICS_NODISCARD constexpr decltype(auto)
+get(fixed_transform_view<base_type, function_type>&& view) {
+    return ranges::detail::fixed_element<index>(view);
+}
+
 } // namespace views
 
 } // namespace math
+
+namespace std {
+
+template <ranges::view base_type, typename function_type>
+struct tuple_size<math::views::fixed_transform_view<base_type, function_type>>
+    : integral_constant<
+          size_t,
+          math::views::fixed_transform_view<base_type,
+                                            function_type>::static_extent> {};
+
+template <size_t index, ranges::view base_type, typename function_type>
+    requires (index < math::views::fixed_transform_view<
+                          base_type, function_type>::static_extent)
+struct tuple_element<
+    index, math::views::fixed_transform_view<base_type, function_type>> {
+    using type = remove_reference_t<
+        decltype(math::ranges::detail::fixed_element<index>(
+            declval<math::views::fixed_transform_view<base_type,
+                                                      function_type>&>()))>;
+};
+
+} // namespace std
 
 #endif // MATHEMATICS_VIEWS_HPP
