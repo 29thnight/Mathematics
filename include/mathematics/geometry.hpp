@@ -18,5 +18,6 @@
 #include <mathematics/intersect.hpp>
 #include <mathematics/plane.hpp>
 #include <mathematics/ray.hpp>
+#include <mathematics/transform.hpp>
 
 #endif // MATHEMATICS_GEOMETRY_HPP

@@ -16,6 +16,7 @@
 #ifndef MATHEMATICS_TRANSFORM_HPP
 #define MATHEMATICS_TRANSFORM_HPP
 
+#include <mathematics/bounds.hpp>
 #include <mathematics/matrix.hpp>
 #include <mathematics/quaternion.hpp>
 #include <mathematics/scalar.hpp>
@@ -102,6 +103,53 @@ compose(const vector3& scale, const quaternion& rotation,
     m.m[3][1] = translation.y;
     m.m[3][2] = translation.z;
     return m;
+}
+
+// ---------------------------------------------------------- AABB affine transform
+// An AABB cannot retain an orientation. Transform its centre as a point, then
+// project its three half-width vectors onto each world axis. Taking the absolute
+// value of the linear rows produces the same tight world AABB as transforming
+// all eight corners, with three multiply-add chains instead of eight point
+// transforms plus a min/max reduction.
+//
+// This is an affine operation: perspective projection matrices are outside the
+// contract because no homogeneous divide is performed.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr aabb
+transform(const aabb& box, const matrix4x4& matrix) noexcept {
+    if (box.is_empty()) return box;
+
+    const vec_reg row0 = matrix.row(0);
+    const vec_reg row1 = matrix.row(1);
+    const vec_reg row2 = matrix.row(2);
+    const vec_reg center = box.center.reg();
+    const vec_reg extents = box.extents.reg();
+
+    vec_reg transformed_center = mul(splat_x(center), row0);
+    transformed_center =
+        mul_add(splat_y(center), row1, transformed_center);
+    transformed_center =
+        mul_add(splat_z(center), row2, transformed_center);
+    transformed_center = add(transformed_center, matrix.row(3));
+
+    vec_reg transformed_extents = mul(splat_x(extents), abs(row0));
+    transformed_extents =
+        mul_add(splat_y(extents), abs(row1), transformed_extents);
+    transformed_extents =
+        mul_add(splat_z(extents), abs(row2), transformed_extents);
+
+    return aabb{vector3::from_reg(transformed_center),
+                vector3::from_reg(transformed_extents)};
+}
+
+// DirectXCollision BoundingBox::Transform-compatible convenience form. The
+// quaternion is normalized so non-unit caller input follows the library's safe
+// rotation policy; unit input is numerically equivalent to the DirectX path.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr aabb
+transform(const aabb& box, float scale, const quaternion& rotation,
+          const vector3& translation) noexcept {
+    return transform(box,
+                     compose(vector3{scale, scale, scale}, normalize(rotation),
+                             translation));
 }
 
 struct decomposed_transform {

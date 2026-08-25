@@ -175,7 +175,17 @@ frustum 포함/교차, raycast를 같은 입력으로 대조한다.
 math::aabb a{math::vector3{0,0,0}, math::vector3{1,1,1}}; // [-1,1] 상자
 math::aabb b = math::aabb::from_min_max(                   // [0,1] 상자 — 다르다
     math::vector3{0,0,0}, math::vector3{1,1,1});
+
+const math::matrix4x4 world =
+    math::translation_matrix(math::vector3{10, 0, 0});
+const math::aabb world_bounds = math::transform(a, world);
 ```
+
+`transform(aabb, matrix4x4)`는 affine 행렬의 이동·회전·비균등/음수 스케일·shear를
+적용한 뒤 결과를 다시 축 정렬한 가장 작은 AABB를 반환한다. 중심은 점으로 변환하고,
+extents는 행렬 선형부의 절댓값으로 투영한다. 이는 8개 코너를 변환하는
+`DirectX::BoundingBox::Transform`과 같은 결과지만 perspective 행렬은 계약 밖이다.
+DirectX와 같은 uniform `scale, rotation, translation` 오버로드도 제공한다.
 
 ### C++20 range view와 C++23 mdspan
 
@@ -355,6 +365,7 @@ raycast(r, a, d)  -> bool + float  맞는가, 얼마나 멀리
 | `XMPlaneNormalize` | `normalize(plane)` |
 | `XMScalarSinCos` | `sin_cos` |
 | `BoundingSphere` / `BoundingBox` | `sphere` / `aabb` |
+| `BoundingBox::Transform` | `transform(aabb, matrix)` / `transform(aabb, scale, rotation, translation)` |
 | `BoundingFrustum` | `bounding_frustum` |
 | `BoundingFrustum::CreateFromMatrix` | `bounding_frustum_from_projection_lh/rh` |
 | `BoundingFrustum::GetCorners/GetPlanes` | `corners()` / `frustum_planes` |
