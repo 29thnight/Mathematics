@@ -45,12 +45,17 @@ struct vector3 {
     MATHEMATICS_NODISCARD MATHEMATICS_INLINE static constexpr vector3
     from_reg(vec_reg r) noexcept {
         MATHEMATICS_IF_CONSTEVAL { return vector3{get_x(r), get_y(r), get_z(r)}; }
-#if MATHEMATICS_SIMD_SSE
-        // Three lane reads is what the constant-evaluated path has to say, but
-        // it is not what the object should be written with: see store3. The
-        // local survives the return -- the caller's destination is what MSVC
-        // ends up storing into -- so this is one 8-byte store and one fused
-        // extract-store, not a build followed by a copy.
+#if MATHEMATICS_SIMD_SSE && MATHEMATICS_COMPILER_MSVC
+        // MSVC only, and the mirror image of the split in reg() above. It emits
+        // a shuffle per lane for the three-scalar form, which is two more than
+        // the store needs; store3 says the same thing in one 8-byte store and
+        // one fused extract.
+        //
+        // Clang must not take this path. It already folds the lane-wise form
+        // into exactly these two instructions, and going through memory instead
+        // costs it the register-resident chain: a serial cross, where the
+        // result feeds straight back into reg(), then pays a store-to-load
+        // round trip it did not pay before. Measured at 6.45 -> 10.68 ns.
         vector3 result;
         store3(&result, r);
         return result;

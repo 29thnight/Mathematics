@@ -132,11 +132,14 @@ MATHEMATICS_INLINE void MATHEMATICS_CALL store_aligned(float* p, vec_reg a) noex
 // on its own; MSVC does not, and cannot be talked into it from the value side.
 MATHEMATICS_INLINE void MATHEMATICS_CALL store3(void* object, vec_reg a) noexcept {
     auto* const bytes = static_cast<unsigned char*>(object);
-    // __m128i* is a may-alias type in every backend that defines it, and z goes
-    // through a float* to a float member, so neither write needs a memcpy to
-    // stay clear of TBAA. _mm_store_sd would be the obvious spelling of the
-    // first one and is the wrong one: GCC's emmintrin.h implements it as a
-    // plain store through double*, which these three floats are not.
+    // Spelling matters here, and not for the reason it usually does.
+    // _mm_storel_pi is the domain-correct movlps and MSVC will not fold it into
+    // the caller's destination -- it routes the object through a stack slot and
+    // reloads it, which is two memory operations more than this exists to save.
+    // _mm_store_sd is worse still: GCC's emmintrin.h implements it as a plain
+    // store through double*, which these three floats are not. __m128i* is a
+    // may-alias type in every backend that defines it, and z reaches a float
+    // member, so neither write needs a memcpy to stay clear of TBAA.
     _mm_storel_epi64(reinterpret_cast<__m128i*>(bytes), _mm_castps_si128(a.v));
 #if MATHEMATICS_HAS_SSE4
     const int z_bits = _mm_extract_ps(a.v, 2);
