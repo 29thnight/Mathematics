@@ -28,36 +28,68 @@ if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 
+# Tolerance is per comparison, because the five do not resolve to the same
+# precision and pretending they do is what made this gate unactionable.
+#
+# The two latency comparisons are register-resident chains. They reproduce: the
+# same cross latency figure, 6.452 ns, came back from separate runs on separate
+# runners, at a CV around 1%. They keep -MaxRegressionPercent, and a change of a
+# few percent there is a real change.
+#
+# The throughput comparisons write to memory, and their absolute numbers move
+# with where the linker happened to put things. Measured on DirectXMath's own
+# benchmarks, whose source did not change at all across these runs:
+#
+#   dx cross throughput      741.4 -> 793.5 M/s  (+7%)  same runner, our
+#                                                        library relinked
+#   dx matrix4x4 transpose   477.4 -> 631.4 M/s (+32%)  runner swapped, and the
+#                                                        verdict on that row went
+#                                                        from -46% to +0.2%
+#   quaternion multiply      0.00% on one runner, +10.59% on another, from an
+#                            instruction stream identical to DirectXMath's
+#
+# docs/BASELINE.md 8 records the same effect from the other side -- that family
+# moves with .text alignment. The arena fixed the data placement; nothing here
+# fixes the code placement, and a 5% bar on a measurement that swings 30 points
+# reports the linker's mood. The numbers below are what each row was actually
+# observed to swing, so a failure means a real regression rather than a rebuild.
+# They are a tripwire for gross loss, not a precision instrument: read the
+# uploaded JSON for anything finer.
 $comparisons = @(
     [pscustomobject]@{
         Label = 'Cross latency'
         Candidate = 'bm_mathematics_cross_latency'
         Baseline = 'bm_dx_math_cross_latency_packed'
         Metric = 'latency'
+        Tolerance = $MaxRegressionPercent
     },
     [pscustomobject]@{
         Label = 'Cross throughput'
         Candidate = 'bm_mathematics_cross_throughput'
         Baseline = 'bm_dx_math_cross_throughput'
         Metric = 'throughput'
+        Tolerance = 35.0
     },
     [pscustomobject]@{
         Label = 'Matrix4x4 transpose'
         Candidate = 'bm_mathematics_matrix4x4_transpose'
         Baseline = 'bm_dx_math_matrix4x4_transpose'
         Metric = 'throughput'
+        Tolerance = 35.0
     },
     [pscustomobject]@{
         Label = 'Quaternion multiply latency'
         Candidate = 'bm_mathematics_quaternion_multiply_latency'
         Baseline = 'bm_dx_math_quaternion_multiply_latency_packed'
         Metric = 'latency'
+        Tolerance = $MaxRegressionPercent
     },
     [pscustomobject]@{
         Label = 'Quaternion multiply throughput'
         Candidate = 'bm_mathematics_quaternion_multiply_throughput'
         Baseline = 'bm_dx_math_quaternion_multiply_throughput'
         Metric = 'throughput'
+        Tolerance = 20.0
     }
 )
 
@@ -173,16 +205,17 @@ foreach ($comparison in $comparisons) {
             $comparison.Label, $candidateCv, $baselineCv, $MaxCvPercent)
     }
 
-    $status = if ($regression -gt $MaxRegressionPercent) { 'FAIL' } else { 'PASS' }
-    Write-Host ('[{0}] {1}: {2}; regression {3:N2}%; CV {4:N2}%/{5:N2}%' -f
-        $status, $comparison.Label, $display, $regression, $candidateCv, $baselineCv)
+    $tolerance = [double]$comparison.Tolerance
+    $status = if ($regression -gt $tolerance) { 'FAIL' } else { 'PASS' }
+    Write-Host ('[{0}] {1}: {2}; regression {3:N2}% of {4:N0}% allowed; CV {5:N2}%/{6:N2}%' -f
+        $status, $comparison.Label, $display, $regression, $tolerance, $candidateCv, $baselineCv)
     if ($status -eq 'FAIL') {
         $failed = $true
     }
 }
 
 if ($failed) {
-    throw "Performance regression exceeded $MaxRegressionPercent%. JSON: $outputFullPath"
+    throw "Performance regression exceeded the per-comparison tolerance. JSON: $outputFullPath"
 }
 
 Write-Host "Performance gate passed. JSON: $outputFullPath"
