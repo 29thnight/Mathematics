@@ -20,6 +20,7 @@ DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 �
 - `vector2/3/4`, `matrix3x3/4x4`, `quaternion`, `color`, `rect`, `plane`,
   `ray`, `aabb`, `sphere`, `bounding_frustum` 제공
 - 벡터·행렬·쿼터니언·TRS·뷰/투영·교차 판정을 하나의 헤더 온리 API로 구성
+- 34개 `constexpr` easing, 값 타입별 보간, pipeable tween view와 무할당 `tween<T>` 제공
 - 같은 API를 런타임 SIMD 경로와 `constexpr` 상수 평가에서 사용
 - 연속 점 집합은 `std::span`, 실패 가능한 역행렬·분해·raycast는 `std::optional` API 제공
 - 벡터 성분·행렬 행은 C++20 range view, 행렬은 C++23 `std::mdspan` view로 무복사 접근
@@ -104,6 +105,8 @@ static_assert(math::cross(x, y) == math::vector3::unit_z());
 |------|------|
 | 전체 API | `<mathematics/mathematics.hpp>` |
 | 스칼라·각도·삼각함수 | `<mathematics/scalar.hpp>` |
+| easing·보간·상태형 tween | `<mathematics/easing.hpp>`, `<mathematics/tween.hpp>` |
+| pipeable tween range view | `<mathematics/tween_views.hpp>` |
 | 벡터 | `<mathematics/vector.hpp>` 또는 개별 `vector2/3/4.hpp` |
 | 색상·2D 사각형 | `<mathematics/color.hpp>`, `<mathematics/rect.hpp>` |
 | 행렬 | `<mathematics/matrix.hpp>` 또는 개별 `matrix3x3/4x4.hpp` |
@@ -168,6 +171,30 @@ for (float x : squared) consume(x);
 float sum = squared
           | math::ranges::fold_fixed(0.0f, std::plus<>{});
 ```
+
+Easing은 입력을 암묵적으로 clamp하지 않는다. 범위를 제한할 때는 이름에 드러나는
+`ease_clamped`를 사용한다. 단일 값, 샘플 range, manager 소유 재생 상태는 같은 정책을
+공유한다.
+
+```cpp
+const math::vector3 position = math::tween_value(
+    start, destination, progress, math::easing::cubic_in_out);
+
+auto samples = progress_samples
+             | math::views::tween(start, destination,
+                                  math::easing::cubic_in_out);
+
+auto track = math::make_tween(start, destination, 0.5f)
+                 .ease(math::easing::cubic_in_out)
+                 .delay(0.1f);
+const auto step = track.advance(delta_seconds);
+apply_position(step.value);
+```
+
+`tween<T>`는 대상 포인터·callback·clock·manager를 소유하지 않는 값 객체다. 엔진은
+검증 가능한 entity handle과 함께 컨테이너에 저장하고, `advance` 결과를 대상에 적용한 뒤
+완료 entry를 제거한다. 상세 계약과 선택 근거는
+[Easing과 Tween 설계](docs/EASING-TWEEN-DESIGN.md)에 있다.
 
 ## 요구 사항과 지원 환경
 
@@ -309,6 +336,7 @@ DirectXMath, GLM, Vectormath를 같은 하니스로 측정한 결과다. 절대 
 
 - [EXPRESSIONS.md](docs/EXPRESSIONS.md) — 표현식 중심의 기능 소개와 실전 예제
 - [GUIDE.md](docs/GUIDE.md) — 관례, 예제, 퇴화 입력 정책, DirectXMath 이주표
+- [EASING-TWEEN-DESIGN.md](docs/EASING-TWEEN-DESIGN.md) — easing·view·tween 소유권과 성능 결정
 - [PLAN.md](docs/PLAN.md) — 설계 결정, Phase 이력, 현재 릴리스 판정
 - [BASELINE.md](docs/BASELINE.md) — 성능 기준선과 재현 절차
 - [SPIKE-RESULTS.md](docs/SPIKE-RESULTS.md) — constexpr·SIMD 코드 생성 검증

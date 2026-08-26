@@ -326,6 +326,75 @@ math::to_axis_angle(rotation, axis, angle);
 const bool equivalent = math::same_rotation(q, -q);
 ```
 
+## Easing과 Tween
+
+단일 값을 보간할 때 easing과 값 타입을 그대로 조합한다. 기본 보간은 scalar,
+벡터, 색상과 사각형에서 같은 표현을 쓴다.
+
+```cpp
+const vector3 position = math::tween_value(
+    spawn_position, goal_position, progress,
+    math::easing::cubic_in_out);
+
+const color flash = math::tween_value(
+    color::white(), color::transparent(), progress,
+    math::easing::exponential_out);
+
+const rect panel = math::tween_value(
+    collapsed, expanded, progress, math::easing::back_out);
+```
+
+Easing 함수는 원래 입력을 그대로 받는다. UI처럼 진행률을 `[0, 1]`로 제한해야 한다면
+clamp가 호출식에 보이게 쓴다.
+
+```cpp
+const float eased = math::ease_clamped(
+    progress, math::easing::smoothstep);
+
+const vector3 bounded = math::tween_value_clamped(
+    start, end, progress, math::easing::smoothstep);
+```
+
+진행률 sample을 미리 만들거나 검사할 때는 range pipeline으로 연결한다.
+
+```cpp
+constexpr std::array timeline{0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+auto path = timeline
+          | math::views::ease(math::easing::sine_in_out)
+          | math::views::lerp(start, end);
+
+auto same_path = timeline
+               | math::views::tween(
+                     start, end, math::easing::sine_in_out);
+```
+
+쿼터니언 보간은 normalized linear와 spherical 정책 중 하나를 표현식에 남긴다.
+
+```cpp
+const quaternion rotation = math::tween_value(
+    from_rotation, to_rotation, progress,
+    math::easing::smoothstep, math::interpolation::spherical);
+
+auto rotations = timeline | math::views::slerp(from_rotation, to_rotation);
+```
+
+매 프레임 delta를 누적하는 재생 상태는 range view가 아니라 `tween<T>`가 담당한다.
+
+```cpp
+auto track = math::make_tween(start, end, 0.4f)
+                 .ease(math::easing::cubic_out)
+                 .playback(math::tween_playback::loop)
+                 .cycles(math::infinite_cycles);
+
+const auto step = track.advance(delta_seconds);
+set_position(step.value);
+```
+
+`tween<T>` 안에는 대상 포인터나 callback이 없다. 게임의 manager가 entity handle과
+나란히 저장하고 완료된 entry를 update iteration 뒤 제거한다. 상세 소유권 모델은
+[EASING-TWEEN-DESIGN.md](EASING-TWEEN-DESIGN.md)를 참고한다.
+
 ## 카메라와 투영
 
 손잡이는 함수 이름에서 반드시 선택한다. 아래 예는 왼손 좌표계와 Direct3D 깊이 범위를
@@ -503,6 +572,9 @@ const std::string box_text = std::format("{}", bounds);
 |------|------|
 | 전체 API | `<mathematics/mathematics.hpp>` |
 | 스칼라, 각도, 삼각함수 | `<mathematics/scalar.hpp>` |
+| easing | `<mathematics/easing.hpp>` |
+| 보간과 상태형 tween | `<mathematics/tween.hpp>` |
+| tween range adaptor | `<mathematics/tween_views.hpp>` |
 | 벡터 | `<mathematics/vector.hpp>` |
 | 행렬 | `<mathematics/matrix.hpp>` |
 | 쿼터니언 | `<mathematics/quaternion.hpp>` |

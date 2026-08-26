@@ -9,9 +9,15 @@ add_executable(mathematics_aabb_bench aabb_transform_bench.cpp)
 target_link_libraries(mathematics_aabb_bench
     PRIVATE mathematics mathematics_build_settings mathematics_fp_fast benchmark::benchmark)
 
+add_executable(mathematics_easing_tween_bench easing_tween_bench.cpp)
+target_link_libraries(mathematics_easing_tween_bench
+    PRIVATE mathematics mathematics_build_settings mathematics_fp_fast benchmark::benchmark)
+
 if(MATHEMATICS_HAVE_DIRECTXMATH)
     target_compile_definitions(mathematics_bench PRIVATE MATHEMATICS_BENCH_HAS_DXMATH=1)
     target_compile_definitions(mathematics_aabb_bench PRIVATE
+        MATHEMATICS_BENCH_HAS_DXMATH=1)
+    target_compile_definitions(mathematics_easing_tween_bench PRIVATE
         MATHEMATICS_BENCH_HAS_DXMATH=1)
 else()
     message(WARNING "DirectXMath not found: the primary performance baseline "

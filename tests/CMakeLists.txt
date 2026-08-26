@@ -15,6 +15,9 @@ add_executable(mathematics_tests
     matrix_test.cpp
     mdspan_test.cpp
     scalar_test.cpp
+    easing_test.cpp
+    tween_test.cpp
+    tween_views_test.cpp
     quaternion_test.cpp
     transform_test.cpp
     geometry_test.cpp

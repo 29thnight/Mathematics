@@ -269,6 +269,81 @@ transposed[1, 2] = 4.0f;           // world.m[2][1]
 이 view들은 수명도 늘리지 않고 데이터를 소유하지도 않는다. 행렬 연산 자체는 기존
 `matrix4x4`/SIMD API를 사용하고 view는 검사·직렬화·범용 알고리즘 연결에 사용한다.
 
+### Easing, tween view와 재생 상태
+
+Easing은 정규화 진행률을 변환하는 순수 함수다. `linear`, `step`, `smoothstep`,
+`smootherstep`와 quadratic부터 quintic까지의 in/out/in-out, sine, circular,
+exponential, elastic, back, bounce 계열을 제공한다. 함수 자체는 입력을 clamp하지 않아
+extrapolation과 overshoot를 보존한다.
+
+```cpp
+const float raw = math::easing::quadratic_in(-0.5f); // 0.25
+const float bounded = math::ease_clamped(
+    -0.5f, math::easing::quadratic_in);              // 0
+
+const math::color tint = math::tween_value(
+    math::color::black(), math::color::white(), progress,
+    math::easing::sine_in_out);
+
+const math::rect panel = math::tween_value(
+    closed_panel, open_panel, progress, math::easing::back_out);
+```
+
+`vector2/3/4`, `color`, `rect`와 scalar는 기본 linear interpolator를 쓴다. 쿼터니언은
+의도를 감추지 않도록 `nlerp` 또는 `slerp` 정책을 명시하는 편이 좋다.
+
+```cpp
+const math::quaternion orientation = math::tween_value(
+    from_rotation, to_rotation, progress, math::easing::smoothstep,
+    math::interpolation::spherical);
+```
+
+여러 progress를 lazy하게 투영하려면 C++20 pipe adaptor를 쓴다. `std::array`, 고정
+`std::span`, Mathematics의 fixed view는 결과 타입에도 static extent가 남고,
+`std::vector` 같은 동적 range는 표준 transform view 경로를 쓴다.
+
+```cpp
+constexpr std::array progress_samples{0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+auto positions = progress_samples
+               | math::views::ease(math::easing::cubic_in_out)
+               | math::views::lerp(start, destination);
+
+// 같은 조합의 fused spelling
+auto same_positions = progress_samples
+                    | math::views::tween(
+                          start, destination, math::easing::cubic_in_out);
+```
+
+실시간 재생은 `tween<T>`가 elapsed, delay, playback과 cycle을 값으로 소유한다.
+대상 객체, callback, clock과 manager는 소유하지 않는다. 따라서 복사본은 독립적으로
+진행하고 `std::vector` 재할당 뒤에도 외부 수명 연결이 생기지 않는다.
+
+```cpp
+auto track = math::make_tween(start, destination, 0.5f)
+                 .ease(math::easing::cubic_in_out)
+                 .delay(0.1f)
+                 .playback(math::tween_playback::ping_pong)
+                 .cycles(3u);
+
+const auto step = track.advance(delta_seconds);
+set_position(step.value);
+if (step.completed()) queue_finished_event();
+```
+
+Manager는 tween과 대상의 검증 가능한 ID를 한 entry에 저장한다. 업데이트 중에는 완료나
+대상 소멸만 표시하고, iteration 뒤 entry를 제거하며 callback은 별도 큐에서 실행한다.
+외부 handle은 slot index와 generation을 사용하고 `tween<T>*`나 vector iterator를
+노출하지 않는다. 이 경계가 재할당, 대상 선소멸, callback 재진입을 tween 코어 밖에서
+명시적으로 처리하게 한다.
+
+`once`는 cycle 설정과 무관하게 한 번 재생한다. `loop`의 한 cycle은 from→to 한 구간,
+`ping_pong`의 한 cycle은 from→to→from 왕복이다. `duration == 0`은 즉시 완료하며,
+음수·NaN·무한 시간은 Debug 계약 위반이고 Release에서는 0으로 정규화된다.
+
+전체 API와 경쟁 라이브러리 비교, manager 예제의 소유권 근거는
+[EASING-TWEEN-DESIGN.md](EASING-TWEEN-DESIGN.md)에 정리돼 있다.
+
 ---
 
 ## 4. 퇴화 입력의 규약
