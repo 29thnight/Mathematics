@@ -81,6 +81,14 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load(const flo
 // address, not &first_member: byte access may span an object's representation,
 // while float-pointer arithmetic across distinct members would be undefined.
 // The 8+4-byte split matches vector3's stores and enables forwarding in chains.
+//
+// The memcpy phrasing is load-bearing, and not for a reason the code shows.
+// Saying the same eight bytes as _mm_loadl_epi64 through __m128i* -- the exact
+// mirror of store3 below, and four instructions shorter on 19.44, which spills
+// this form to a stack slot and reads it back -- makes 19.51 stop compiling.
+// tests/frustum_test.cpp under -std:c++20 /fp:precise ran past seven minutes
+// twice and finished in thirty-seven seconds with the memcpy restored. Four
+// instructions on one toolset is not worth a hang on the other.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load3(const void* object) noexcept {
     const auto* bytes = static_cast<const unsigned char*>(object);
     std::uint64_t xy_bits;

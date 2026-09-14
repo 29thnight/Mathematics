@@ -44,9 +44,9 @@ struct vector3 {
         // lanes one at a time, seven instructions per operand against two.
         // cross reads two operands, so fourteen instructions an element went
         // into loads that DirectXMath spends four on -- which is the whole of
-        // the throughput gap docs/OPEN-ISSUES.md section 1 could not explain,
-        // and the reason the store3 fix moved cross latency without moving
-        // cross throughput. The loop was never store-bound; it was load-bound.
+        // the throughput gap docs/BASELINE.md section 10 records, and the
+        // reason the store3 fix moved cross latency without moving cross
+        // throughput. The loop was never store-bound; it was load-bound.
         //
         // GCC keeps set: nothing here has measured it, and no gate would catch
         // a regression on that path.

@@ -188,16 +188,17 @@ void probe_rows_structured_sum(std::size_t count) {
 }
 
 // ------------------------------------------------- observation, not a gate
-// No CODEGEN-GATE directive on purpose: these two carry no expectation yet,
-// they are here so the listing CI already uploads contains the pair of loops
-// docs/OPEN-ISSUES.md section 1 is about, compiled by the runner's own cl.exe.
+// No CODEGEN-GATE directive on purpose: these two carry no expectation, they
+// are here so the listing CI already uploads contains the pair of loops that
+// docs/BASELINE.md section 10 is about, compiled by the runner's own cl.exe.
 //
-// That section rules codegen out, and the listing it rules it out from was
-// produced by a local toolset. The runner's is 19.44; the local one is 19.51,
-// a VS generation ahead. Two loops can only be compared when the same compiler
-// compiled both, and that is the one variable the investigation never held
-// fixed. The bodies below are the benchmark's inner loops verbatim, with the
-// same compile-time bound, so the listing is comparable to the benchmark's.
+// Reading them off a local toolset is what kept that section open for a month.
+// The runner compiles with 19.44 and this machine with 19.51, a Visual Studio
+// generation ahead, and the two disagree about this exact loop badly enough to
+// invert which library is ahead. Two loops can only be compared when the same
+// compiler compiled both. The bodies below are the benchmark's inner loops
+// verbatim, with the same compile-time bound, so what the artifact shows is
+// what the benchmark ran.
 constexpr int cross_stream_count = 512;
 
 void probe_cross_mathematics(const math::vector3* d, math::vector3* out) {
