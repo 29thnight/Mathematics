@@ -36,8 +36,13 @@ $logPath = Join-Path $OutputDirectory 'mathematics-codegen-probes.log'
 
 # The bench target's flags. A different /arch or /fp would measure a different
 # compiler, and the point is to gate what the benchmarks actually compile to.
+# NDEBUG belongs to that set: CMake's Release configuration defines it, and
+# without it a listing of anything that asserts -- DirectXMath's loads and
+# stores assert on their pointer -- carries branches and calls the benchmark
+# never compiles.
 $compilerArguments = @(
     '/nologo', '/c'
+    '/DNDEBUG'
     '/std:c++latest', '/O2', '/EHsc', '/W4', '/permissive-'
     '/Zc:__cplusplus', '/Zc:preprocessor', '/utf-8'
     '/arch:AVX2', '/fp:fast'

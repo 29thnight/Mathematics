@@ -17,6 +17,7 @@
 // undeclared external call rather than a benchmark-library macro, so the file
 // depends on nothing but the headers under test.
 
+#include <mathematics/vector3.hpp>
 #include <mathematics/views.hpp>
 
 #include <atomic>
@@ -24,6 +25,13 @@
 #include <cstddef>
 #include <functional>
 #include <span>
+
+#if __has_include(<DirectXMath.h>)
+#  include <DirectXMath.h>
+#  define MATHEMATICS_PROBE_HAS_DXMATH 1
+#else
+#  define MATHEMATICS_PROBE_HAS_DXMATH 0
+#endif
 
 extern "C" void mathematics_codegen_escape(void* address) noexcept;
 
@@ -178,5 +186,36 @@ void probe_rows_structured_sum(std::size_t count) {
         escape(result);
     }
 }
+
+// ------------------------------------------------- observation, not a gate
+// No CODEGEN-GATE directive on purpose: these two carry no expectation yet,
+// they are here so the listing CI already uploads contains the pair of loops
+// docs/OPEN-ISSUES.md section 1 is about, compiled by the runner's own cl.exe.
+//
+// That section rules codegen out, and the listing it rules it out from was
+// produced by a local toolset. The runner's is 19.44; the local one is 19.51,
+// a VS generation ahead. Two loops can only be compared when the same compiler
+// compiled both, and that is the one variable the investigation never held
+// fixed. The bodies below are the benchmark's inner loops verbatim, with the
+// same compile-time bound, so the listing is comparable to the benchmark's.
+constexpr int cross_stream_count = 512;
+
+void probe_cross_mathematics(const math::vector3* d, math::vector3* out) {
+    for (int i = 0; i < cross_stream_count / 2; ++i) {
+        out[i] = math::cross(d[i], d[i + cross_stream_count / 2]);
+    }
+}
+
+#if MATHEMATICS_PROBE_HAS_DXMATH
+void probe_cross_dxmath(const DirectX::XMFLOAT3* d, DirectX::XMFLOAT3* out) {
+    for (int i = 0; i < cross_stream_count / 2; ++i) {
+        DirectX::XMStoreFloat3(
+            &out[i],
+            DirectX::XMVector3Cross(
+                DirectX::XMLoadFloat3(&d[i]),
+                DirectX::XMLoadFloat3(&d[i + cross_stream_count / 2])));
+    }
+}
+#endif
 
 } // extern "C"
