@@ -93,9 +93,11 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load(const flo
 // first is the only spelling that survives.
 //
 // The cost of keeping it: 19.44 spills that value to a stack slot and reads it
-// straight back, four instructions an element it has no use for, which is most
-// of the gap docs/BASELINE.md section 10 leaves open. Four instructions on one
-// toolset are not worth a hang on the other.
+// straight back, three instructions an element it has no use for, which is most
+// of the gap docs/BASELINE.md section 10 leaves open. How much either
+// alternative would actually recover there is unmeasured and unmeasurable --
+// neither finishes compiling here, so neither can be put in front of the
+// runner's compiler at all.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load3(const void* object) noexcept {
     const auto* bytes = static_cast<const unsigned char*>(object);
     std::uint64_t xy_bits;
