@@ -83,12 +83,19 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load(const flo
 // The 8+4-byte split matches vector3's stores and enables forwarding in chains.
 //
 // The memcpy phrasing is load-bearing, and not for a reason the code shows.
-// Saying the same eight bytes as _mm_loadl_epi64 through __m128i* -- the exact
-// mirror of store3 below, and four instructions shorter on 19.44, which spills
-// this form to a stack slot and reads it back -- makes 19.51 stop compiling.
-// tests/frustum_test.cpp under -std:c++20 /fp:precise ran past seven minutes
-// twice and finished in thirty-seven seconds with the memcpy restored. Four
-// instructions on one toolset is not worth a hang on the other.
+// Both obvious improvements on it stop 19.51 from compiling: _mm_loadl_epi64
+// through __m128i*, which is the exact mirror of store3 below, and
+// _mm_load_sd through double*, which is what XMLoadFloat3 uses. Each ran
+// tests/frustum_test.cpp past its timeout under -std:c++20 /fp:precise -- seven
+// minutes twice for the first, five for the second -- where the form below
+// finishes in thirty-seven seconds. What the two have in common is loading
+// through a pointer-typed intrinsic; materializing the eight bytes as a value
+// first is the only spelling that survives.
+//
+// The cost of keeping it: 19.44 spills that value to a stack slot and reads it
+// straight back, four instructions an element it has no use for, which is most
+// of the gap docs/BASELINE.md section 10 leaves open. Four instructions on one
+// toolset are not worth a hang on the other.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load3(const void* object) noexcept {
     const auto* bytes = static_cast<const unsigned char*>(object);
     std::uint64_t xy_bits;
