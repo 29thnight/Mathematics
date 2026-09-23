@@ -8,7 +8,9 @@
 cmake_minimum_required(VERSION 3.24)
 project(mathematics_package_consumer LANGUAGES CXX)
 
-find_package(Mathematics REQUIRED)
+# Asking for a version exercises the installed version file as well: 1.0 must
+# accept this release under SameMajorVersion.
+find_package(Mathematics 1.0 REQUIRED)
 message(STATUS "Found Mathematics ${Mathematics_VERSION} at ${Mathematics_DIR}")
 
 add_executable(package_consumer main.cpp)

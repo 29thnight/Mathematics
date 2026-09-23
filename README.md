@@ -1,19 +1,18 @@
 # Mathematics
 
-[![CI](https://github.com/29thnight/mathf/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/29thnight/mathf/actions/workflows/ci.yml)
+[![CI](https://github.com/29thnight/Mathematics/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/29thnight/Mathematics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 게임 수학 라이브러리다.
 헤더 온리이며 x64의 SSE2/AVX2, ARM64의 NEON, 이식성 검증을 위한 스칼라 폴백을 지원한다.
 
-> **개발 상태:** Phase 0~5 기능 구현은 완료됐지만 0.1 릴리스 게이트는 아직 미통과다.
-> 기하 회귀 3건과 `cross`·행렬 전치·쿼터니언 곱 성능 회귀는 해결됐고, CI가 해당
-> 성능 비교와 GCC line coverage 80%를 강제한다. 남은 릴리스 블록은 clang-cl 행렬 곱
-> 처리량과 전체 성능 표의 자동화 범위다. 상세 판정은 [PLAN](docs/PLAN.md), 측정치는
-> [BASELINE](docs/BASELINE.md)을 기준으로 한다.
+> **1.0.0:** 릴리스 기준인 "성능 표 전 항목 DirectXMath 대비 ±5%"를 기준 기계에서
+> MSVC와 clang-cl 모두 통과했다. 판정은 [PLAN](docs/PLAN.md), 측정치는
+> [BASELINE](docs/BASELINE.md), 변경 내역은 [CHANGELOG](CHANGELOG.md)에 있다.
+> 1.0.0부터 공개 API의 호환성은 주 버전이 보증한다.
 
-> **0.1 API 변경:** 라이브러리 이름은 `Mathematics`, 공개 헤더 경로는
-> `<mathematics/...>`, 네임스페이스는 `math`다. 옛 이름을 위한 호환 별칭은 제공하지 않는다.
+> **이름:** 라이브러리 이름은 `Mathematics`, 공개 헤더 경로는 `<mathematics/...>`,
+> 네임스페이스는 `math`다. 0.1 이전 이름을 위한 호환 별칭은 제공하지 않는다.
 
 ## 핵심 특징
 
@@ -32,16 +31,39 @@ DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 �
 
 ### CMake에 연결
 
-저장소를 프로젝트 안에 배치한 뒤 정본 타깃 `Mathematics::Mathematics`에 링크한다.
+어느 방법이든 정본 타깃 `Mathematics::Mathematics`에 링크한다.
+
+**설치 후 `find_package`.** 헤더 온리라 설치에 빌드가 필요 없다.
+
+```bash
+cmake -S . -B build -DMATHEMATICS_BUILD_TESTS=OFF -DMATHEMATICS_BUILD_BENCH=OFF -DMATHEMATICS_BUILD_TOOLS=OFF
+```
+```bash
+cmake --install build --prefix <설치 경로>
+```
 
 ```cmake
-add_subdirectory(external/mathematics)
+find_package(Mathematics 1.0 REQUIRED)   # CMAKE_PREFIX_PATH에 설치 경로를 넣는다
+target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
+```
+
+버전 호환은 주 버전 단위다. `find_package(Mathematics 1.0)`은 1.x를 받고 2.0은 거절한다.
+
+**`FetchContent`나 `add_subdirectory`.** 소스 트리를 그대로 쓴다.
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(Mathematics
+    GIT_REPOSITORY https://github.com/29thnight/Mathematics.git
+    GIT_TAG v1.0.0)
+FetchContent_MakeAvailable(Mathematics)   # 또는 add_subdirectory(external/mathematics)
 
 target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
 target_compile_features(my_game PRIVATE cxx_std_20)
 ```
 
-`add_subdirectory` 소비자에게는 Mathematics의 테스트·벤치마크·경고 옵션이 전파되지 않는다.
+하위 프로젝트로 들어온 Mathematics는 테스트·벤치마크·도구·설치 규칙을 켜지 않고,
+경고 옵션도 소비자에게 전파하지 않는다.
 
 ### C++에서 사용
 
@@ -281,6 +303,7 @@ scripts\open_vs.bat
 | `MATHEMATICS_BUILD_TESTS` | 최상위 `ON`, 하위 프로젝트 `OFF` | GoogleTest 테스트 빌드 |
 | `MATHEMATICS_BUILD_BENCH` | 최상위 `ON`, 하위 프로젝트 `OFF` | Google Benchmark 빌드 |
 | `MATHEMATICS_BUILD_TOOLS` | 최상위 `ON`, 하위 프로젝트 `OFF` | 설정 보고 도구 빌드 |
+| `MATHEMATICS_INSTALL` | 최상위 `ON`, 하위 프로젝트 `OFF` | 설치 규칙과 패키지 설정 파일 생성 |
 | `MATHEMATICS_CXX_STANDARD` | `AUTO` | `AUTO`, `20`, `23` 중 자체 타깃 언어 표준 선택 |
 | `MATHEMATICS_FORCE_SCALAR` | `OFF` | SIMD 대신 스칼라 백엔드 강제 |
 | `MATHEMATICS_BASELINE_SSE2` | `OFF` | x86에서 SSE2 경로만 사용 |
@@ -296,11 +319,14 @@ scripts\open_vs.bat
 | Linux x64 | GCC와 Clang 빌드·테스트 |
 | Linux ARM64 | GCC와 Clang의 NEON 빌드·테스트 |
 | 정확성 | constexpr·스칼라 참조·DirectXMath 패리티 |
-| 성능 | MSVC/clang-cl에서 `cross`, 전치, 쿼터니언 곱을 DXMath와 비교 |
+| 성능 | MSVC/clang-cl에서 `cross`, 전치, 쿼터니언 곱을 DXMath와 비교하고 16행 전체를 기록 |
 | 커버리지 | GCC 활성 코드 line coverage 80% 이상 |
+| 패키지 | 설치한 패키지를 별도 프로젝트가 `find_package`로 소비 (Linux·Windows) |
 
-성능 게이트는 후보가 DXMath 기준보다 5% 넘게 느리거나 측정 변동이 지나치게 크면
-실패한다. 로컬에서 같은 게이트를 실행하려면 다음 명령을 사용한다.
+CI의 성능 게이트는 회귀 탐지선이다. 호스티드 러너의 CPU가 여러 종이어서 행마다
+허용치를 따로 두었다([OPEN-ISSUES §1](docs/OPEN-ISSUES.md)). 릴리스 기준인 전 항목 ±5%는
+기준 기계에서 판정한다. 로컬에서 같은 게이트를 실행하려면 다음 명령을 사용하고,
+`-Table Full -ReportOnly`를 붙이면 릴리스 판정 표 16행 전체를 잰다.
 
 ```powershell
 .\scripts\check_performance.ps1 `
@@ -316,8 +342,8 @@ DirectXMath, GLM, Vectormath를 같은 하니스로 측정한 결과다. 절대 
 
 [![Mathematics와 DirectXMath, GLM, Vectormath 성능 비교](docs/assets/performance-comparison.png)](docs/assets/performance-comparison.png)
 
-재현 명령, 전체 표, 컴파일러별 차이와 알려진 clang-cl 행렬 곱 병목은
-[BASELINE](docs/BASELINE.md)에 기록돼 있다. 저수준 코드 생성 비교는
+재현 명령, 전체 표, 컴파일러별 차이는 [BASELINE](docs/BASELINE.md)에 기록돼 있다.
+clang-cl 행렬 곱과 slerp를 DirectXMath 수준으로 끌어올린 과정은 그 문서의 §12에 있다. 저수준 코드 생성 비교는
 [SPIKE-RESULTS](docs/SPIKE-RESULTS.md)를 참조한다.
 
 ## 저장소 구조
