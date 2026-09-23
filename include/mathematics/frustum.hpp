@@ -1,4 +1,4 @@
-// mathematics/frustum.hpp — an oriented perspective bounding frustum.
+// mathematics/frustum.hpp -- an oriented perspective bounding frustum.
 //
 // The representation deliberately matches DirectXCollision::BoundingFrustum:
 // an origin and orientation plus four X/Z and Y/Z slopes and two local-space Z

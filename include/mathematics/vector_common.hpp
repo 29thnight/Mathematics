@@ -1,4 +1,4 @@
-// mathematics/vector_common.hpp — operations shared by vector2, vector3 and vector4.
+// mathematics/vector_common.hpp -- operations shared by vector2, vector3 and vector4.
 //
 // The three types differ only in how many lanes take part. Everything that does
 // not depend on that count is defined once here, constrained on a concept, so

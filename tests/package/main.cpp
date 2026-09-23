@@ -4,6 +4,9 @@
 // the wrong header, or no header, fails the build or the run.
 
 #include <mathematics/mathematics.hpp>
+// Not part of the umbrella header, so named separately: every public header has
+// to compile warning-free in a user's build.
+#include <mathematics/format.hpp>
 
 #include <cstdio>
 

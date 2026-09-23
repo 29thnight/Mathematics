@@ -1,4 +1,4 @@
-// mathematics/vector2.hpp — packed two-component vector.
+// mathematics/vector2.hpp -- packed two-component vector.
 #ifndef MATHEMATICS_VECTOR2_HPP
 #define MATHEMATICS_VECTOR2_HPP
 

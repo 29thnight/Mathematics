@@ -1,4 +1,4 @@
-// mathematics/color.hpp — linear RGBA colour storage and colour operations.
+// mathematics/color.hpp -- linear RGBA colour storage and colour operations.
 //
 // A colour is deliberately its own type rather than an alias for vector4. The
 // layout is identical, but the names are not: r/g/b/a make call sites readable,

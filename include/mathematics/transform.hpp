@@ -1,4 +1,4 @@
-// mathematics/transform.hpp — transform, view and projection matrices.
+// mathematics/transform.hpp -- transform, view and projection matrices.
 //
 // Everything here follows the conventions the rest of the library already
 // committed to: row-major storage, row vectors, composition left to right in

@@ -1,4 +1,4 @@
-// mathematics/rect.hpp — a float 2D rectangle stored as x/y/width/height.
+// mathematics/rect.hpp -- a float 2D rectangle stored as x/y/width/height.
 //
 // Rectangles use half-open point containment: the minimum edges belong to the
 // rectangle and the maximum edges do not. Adjacent UI rectangles therefore do

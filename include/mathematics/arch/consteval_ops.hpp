@@ -1,4 +1,4 @@
-// mathematics/arch/consteval_ops.hpp — what every operation *means*, defined once.
+// mathematics/arch/consteval_ops.hpp -- what every operation *means*, defined once.
 //
 // Each SIMD backend selects instructions; this file defines the semantics those
 // instructions must reproduce. It serves three roles at once:

@@ -1,4 +1,4 @@
-// mathematics/quaternion.hpp — unit quaternion rotation, DirectXMath conventions.
+// mathematics/quaternion.hpp -- unit quaternion rotation, DirectXMath conventions.
 //
 // Four conventions, all of them load-bearing and all of them observed from
 // DirectXMath rather than assumed:
@@ -305,20 +305,20 @@ slerp(const quaternion& a, const quaternion& b, float t) noexcept {
     // Two sine/cosine pairs, not three sines. The obvious form paid for three
     // full evaluations -- range reduction and both polynomials each, cosine
     // thrown away -- plus a second divide. The identity
-    // sin((1-t)θ) = sin θ cos tθ - cos θ sin tθ gets the first weight from
-    // values already in hand:
+    // sin((1-t)*theta) = sin(theta)*cos(t*theta) - cos(theta)*sin(t*theta)
+    // gets the first weight from values already in hand:
     //
-    //   wb = sin tθ / sin θ
-    //   wa = cos tθ - cos θ * wb
+    //   wb = sin(t*theta) / sin(theta)
+    //   wa = cos(t*theta) - cos(theta) * wb
     //
-    // Both sines of θ come from the same evaluation they are divided by, so the
-    // endpoints stay exact: t = 1 gives wb = 1 and wa = 0 bit for bit, t = 0
+    // Both sines of theta come from the same evaluation they are divided by, so
+    // the endpoints stay exact: t = 1 gives wb = 1 and wa = 0 bit for bit, t = 0
     // gives wb = 0 and wa = 1.
     //
-    // And no range reduction. d is in [0, 0.9995] here, so θ = acos(d) is in
-    // (0, pi/2] by construction, and so is tθ for t in [0, 1] -- the kernel's
-    // own domain. Only extrapolation (t outside [0, 1], or NaN) takes the
-    // reducing path. On clang-cl, slerp was 12.6% behind DirectXMath before
+    // And no range reduction. d is in [0, 0.9995] here, so theta = acos(d) is
+    // in (0, pi/2] by construction, and so is t*theta for t in [0, 1] -- the
+    // kernel's own domain. Only extrapolation (t outside [0, 1], or NaN) takes
+    // the reducing path. On clang-cl, slerp was 12.6% behind DirectXMath before
     // this; the reduction's branches and its NaN return, which pushed each pair
     // through a general-purpose register, were most of it -- docs/BASELINE.md
     // section 12.

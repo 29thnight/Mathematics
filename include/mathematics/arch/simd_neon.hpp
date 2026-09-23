@@ -1,4 +1,4 @@
-// mathematics/arch/simd_neon.hpp — AArch64 NEON backend.
+// mathematics/arch/simd_neon.hpp -- AArch64 NEON backend.
 //
 // Verified by CI on AArch64 Linux (GCC and Clang), which is also the only place
 // it is exercised -- no ARM toolchain is available locally. The MSVC/ARM64 path
@@ -149,7 +149,7 @@ neg_mul_add(vec_reg a, vec_reg b, vec_reg c) noexcept {
 //          minps/maxps return the second operand. So Min(NaN, x) is NaN here
 //          and x on x86.
 //
-//   ±0.0   ARM FMIN/FMAX treat -0.0 as strictly less than +0.0 regardless of
+//   +/-0.0   ARM FMIN/FMAX treat -0.0 as strictly less than +0.0 regardless of
 //          operand order. minps/maxps compare them equal and fall through to
 //          the second operand. So Min(-0.0, +0.0) is -0.0 here and +0.0 on x86.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vec_reg MATHEMATICS_CALL

@@ -1,4 +1,4 @@
-// mathematics/arch/simd_select.hpp — includes exactly one backend.
+// mathematics/arch/simd_select.hpp -- includes exactly one backend.
 //
 // Selection is entirely compile-time. Mathematics performs no runtime ISA dispatch, so
 // that an indirect call never enters the hot path; this is the same policy

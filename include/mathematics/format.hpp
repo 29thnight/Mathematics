@@ -1,4 +1,4 @@
-// mathematics/format.hpp — std::format support, and structured bindings.
+// mathematics/format.hpp -- std::format support, and structured bindings.
 //
 // An OPT-IN header, not part of mathematics.hpp. Including <format> pulls in a large
 // chunk of the standard library, and a header-only math library that dragged it

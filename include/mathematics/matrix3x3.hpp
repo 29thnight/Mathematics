@@ -1,4 +1,4 @@
-// mathematics/matrix3x3.hpp — 3x3 matrix, row-major with row-vector convention.
+// mathematics/matrix3x3.hpp -- 3x3 matrix, row-major with row-vector convention.
 //
 // Same conventions as matrix4x4: row-major storage, `v * M`, composition reading
 // left to right. A 3x3 carries rotation and scale but no translation, which is

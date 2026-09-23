@@ -1,4 +1,4 @@
-// mathematics/vector4.hpp — packed four-component vector.
+// mathematics/vector4.hpp -- packed four-component vector.
 #ifndef MATHEMATICS_VECTOR4_HPP
 #define MATHEMATICS_VECTOR4_HPP
 

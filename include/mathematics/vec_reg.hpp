@@ -1,8 +1,8 @@
-// mathematics/vec_reg.hpp — the register-level API.
+// mathematics/vec_reg.hpp -- the register-level API.
 //
 // vec_reg wraps one 128-bit SIMD register and is ALWAYS passed by value. It is
 // not a storage type: Phase 2's vector2/3/4 own memory layout, and values promote
-// to vec_reg to compute. docs/SPIKE-RESULTS.md §3 measures why that separation is
+// to vec_reg to compute. docs/SPIKE-RESULTS.md section 3 measures why that separation is
 // mandatory rather than stylistic -- a four-float struct is decomposed across
 // four registers by __vectorcall and rebuilt at every call boundary.
 //

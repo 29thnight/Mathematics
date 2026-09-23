@@ -1,4 +1,4 @@
-// mathematics/matrix.hpp — the matrix types.
+// mathematics/matrix.hpp -- the matrix types.
 //
 // matrix4x4 and matrix3x3 follow DirectXMath's convention throughout:
 //

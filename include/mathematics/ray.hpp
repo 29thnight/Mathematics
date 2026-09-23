@@ -1,4 +1,4 @@
-// mathematics/ray.hpp — a half-line: an origin and a direction.
+// mathematics/ray.hpp -- a half-line: an origin and a direction.
 //
 // A ray starts at its origin and goes one way only. Every intersection query
 // in intersect.hpp returns a distance measured ALONG THE DIRECTION, so:

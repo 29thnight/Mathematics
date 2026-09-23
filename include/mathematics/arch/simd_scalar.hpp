@@ -1,4 +1,4 @@
-// mathematics/arch/simd_scalar.hpp — portable fallback backend.
+// mathematics/arch/simd_scalar.hpp -- portable fallback backend.
 //
 // Selected when no SIMD backend fits the target, or forced with
 // MATHEMATICS_FORCE_SCALAR so CI keeps this path compiled and tested. It is a

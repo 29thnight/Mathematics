@@ -1,4 +1,4 @@
-// mathematics/mathematics.hpp — everything, for code that does not care about include cost.
+// mathematics/mathematics.hpp -- everything, for code that does not care about include cost.
 //
 // Prefer the individual headers in a translation unit that only needs part of
 // the library: each one is self-contained and they are deliberately small.

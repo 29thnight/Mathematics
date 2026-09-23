@@ -1,4 +1,4 @@
-// mathematics/plane.hpp — the plane ax + by + cz + d = 0.
+// mathematics/plane.hpp -- the plane ax + by + cz + d = 0.
 //
 // Storage and sign follow DirectXMath, observed rather than assumed:
 //

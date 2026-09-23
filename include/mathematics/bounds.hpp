@@ -1,4 +1,4 @@
-// mathematics/bounds.hpp — bounding volumes: Sphere and AABB.
+// mathematics/bounds.hpp -- bounding volumes: Sphere and AABB.
 //
 // AABB stores a CENTRE AND HALF-WIDTHS, not a minimum and a maximum. That is
 // DirectXMath's bounding_box layout, and it is the trap in this file: the two

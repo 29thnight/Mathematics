@@ -1,4 +1,4 @@
-// mathematics/config.hpp — compiler, ISA, and language-standard detection.
+// mathematics/config.hpp -- compiler, ISA, and language-standard detection.
 // Every other Mathematics header includes this first. See docs/SPIKE-RESULTS.md for
 // the measurements that drove these choices.
 #ifndef MATHEMATICS_CONFIG_HPP
@@ -150,7 +150,7 @@
 
 // --- x86 ISA level -----------------------------------------------------------
 // MSVC never defines __SSE4_1__, so SSE4.1 (needed for dpps -- see
-// docs/SPIKE-RESULTS.md §4) must be inferred from /arch:AVX or opted into
+// docs/SPIKE-RESULTS.md section 4) must be inferred from /arch:AVX or opted into
 // explicitly with MATHEMATICS_ENABLE_SSE4, mirroring DirectXMath's _XM_SSE4_INTRINSICS_.
 #if MATHEMATICS_SIMD_SSE
 #  if defined(__SSE4_1__) || defined(__AVX__) || defined(MATHEMATICS_ENABLE_SSE4)

@@ -1,4 +1,4 @@
-// mathematics/geometry.hpp — the geometric primitives and the queries between them.
+// mathematics/geometry.hpp -- the geometric primitives and the queries between them.
 //
 // Conventions, all matched against DirectXMath and DirectXCollision:
 //

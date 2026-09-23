@@ -1,4 +1,4 @@
-// mathematics/intersect.hpp — queries between two geometric primitives.
+// mathematics/intersect.hpp -- queries between two geometric primitives.
 //
 // Separated from the types themselves because every one of these needs two of
 // them, and putting a sphere-versus-box test in either header would make that

@@ -1,4 +1,4 @@
-// mathematics/scalar.hpp — scalar constants and transcendentals.
+// mathematics/scalar.hpp -- scalar constants and transcendentals.
 //
 // These exist because the rest of Phase 4 needs them: an axis-angle quaternion
 // needs sine and cosine, Euler extraction needs arc tangent, a perspective

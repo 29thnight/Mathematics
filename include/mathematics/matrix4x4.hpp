@@ -1,6 +1,6 @@
-// mathematics/matrix4x4.hpp — 4x4 matrix, row-major with row-vector convention.
+// mathematics/matrix4x4.hpp -- 4x4 matrix, row-major with row-vector convention.
 //
-// The convention is DirectXMath's, decided in docs/PLAN.md §7 and load-bearing
+// The convention is DirectXMath's, decided in docs/PLAN.md section 7 and load-bearing
 // for everything here:
 //
 //   * Storage is ROW-MAJOR: m[row][col], and a row is four contiguous floats,
@@ -231,13 +231,23 @@ multiply_avx(const matrix4x4& a, const matrix4x4& b) noexcept {
     // nothing: the fadd lives inside _mm256_add_ps's own inline body, which the
     // pragma's lexical scope does not reach. MSVC does not reassociate
     // intrinsics, which is why its latency was never behind.
-#if defined(__clang__) && __has_builtin(__arithmetic_fence)
-    t0 = _mm256_add_ps(__arithmetic_fence(c2), __arithmetic_fence(c6));
-    t1 = _mm256_add_ps(__arithmetic_fence(c3), __arithmetic_fence(c7));
-#else
-    t0 = _mm256_add_ps(c2, c6);
-    t1 = _mm256_add_ps(c3, c7);
+    //
+    // __has_builtin is tested in its own #if, never beside another condition:
+    // MSVC 19.44 (Visual Studio 2022) does not define it, and
+    // `defined(__clang__) && __has_builtin(x)` is still parsed there although
+    // the left side is false -- warning C4067 in every translation unit that
+    // includes this header, an error under /WX.
+#if defined(__clang__) && defined(__has_builtin)
+#  if __has_builtin(__arithmetic_fence)
+#    define MATHEMATICS_DETAIL_FENCE(value) __arithmetic_fence(value)
+#  endif
 #endif
+#ifndef MATHEMATICS_DETAIL_FENCE
+#  define MATHEMATICS_DETAIL_FENCE(value) (value)
+#endif
+    t0 = _mm256_add_ps(MATHEMATICS_DETAIL_FENCE(c2), MATHEMATICS_DETAIL_FENCE(c6));
+    t1 = _mm256_add_ps(MATHEMATICS_DETAIL_FENCE(c3), MATHEMATICS_DETAIL_FENCE(c7));
+#undef MATHEMATICS_DETAIL_FENCE
 
     matrix4x4 result;
     _mm256_storeu_ps(&result.m[0][0], t0);

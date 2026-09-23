@@ -120,6 +120,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # MSVC reads a source file in the machine's code page unless told /utf-8,
+      # so one non-ASCII byte in a public header is warning C4819 -- an error
+      # under /WX -- on Korean, Japanese and Chinese Windows, and can swallow the
+      # newline ending a // comment. The Windows runners use code page 1252,
+      # which decodes these bytes silently, so no compile here would notice.
+      - name: Public headers are ASCII
+        if: matrix.cc == 'gcc'
+        run: |
+          if LC_ALL=C grep -rnP '[^\x00-\x7F]' include/; then
+            echo "::error::non-ASCII bytes in public headers (see above)"
+            exit 1
+          fi
+
       - name: Configure
         env:
           CC: ${{ matrix.cc }}

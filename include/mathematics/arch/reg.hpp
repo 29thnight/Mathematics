@@ -1,4 +1,4 @@
-// mathematics/arch/reg.hpp — the register type and the primitives every backend needs.
+// mathematics/arch/reg.hpp -- the register type and the primitives every backend needs.
 //
 // Layer 1 of the backend stack:
 //   reg.hpp            <- this file: vec_reg, lane access, bit helpers

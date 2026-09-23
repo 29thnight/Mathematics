@@ -1,4 +1,4 @@
-// mathematics/vector.hpp — the vector types.
+// mathematics/vector.hpp -- the vector types.
 //
 // vector2, vector3 and vector4 are packed, standard-layout types with the full
 // operator set. They are what most code should use: `v.x` reaches a real member,
@@ -19,7 +19,7 @@
 //   vector2      cross (scalar) perpendicular
 //
 // Component-wise multiply is `*`, following HLSL and GLM; the dot product is
-// always Dot, never an operator (docs/PLAN.md §2.7).
+// always Dot, never an operator (docs/PLAN.md section 2.7).
 #ifndef MATHEMATICS_VECTOR_HPP
 #define MATHEMATICS_VECTOR_HPP
 

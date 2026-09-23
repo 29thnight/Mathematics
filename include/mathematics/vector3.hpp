@@ -1,4 +1,4 @@
-// mathematics/vector3.hpp — packed three-component vector.
+// mathematics/vector3.hpp -- packed three-component vector.
 #ifndef MATHEMATICS_VECTOR3_HPP
 #define MATHEMATICS_VECTOR3_HPP
 

@@ -1,4 +1,4 @@
-// mathematics/arch/simd_sse.hpp — x86 SSE/AVX backend.
+// mathematics/arch/simd_sse.hpp -- x86 SSE/AVX backend.
 //
 // Every function has the same two-part shape: the compile-time branch defers to
 // consteval_ops, which defines what the operation means, and the runtime branch
@@ -391,7 +391,7 @@ dot3(vec_reg a, vec_reg b) noexcept {
 }
 
 // dpps in one instruction where SSE4.1 exists; without it the shuffle chain
-// costs three and loses to DirectXMath (docs/SPIKE-RESULTS.md §4).
+// costs three and loses to DirectXMath (docs/SPIKE-RESULTS.md section 4).
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vec_reg MATHEMATICS_CALL
 dot4(vec_reg a, vec_reg b) noexcept {
     MATHEMATICS_IF_CONSTEVAL { return consteval_ops::dot4(a, b); }
