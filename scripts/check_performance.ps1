@@ -225,18 +225,36 @@ foreach ($comparison in $comparisons) {
     $candidateCvResult = Get-CvResult -RunName $comparison.Candidate
     $baselineCvResult = Get-CvResult -RunName $comparison.Baseline
 
+    # Wall-clock time, not CPU time. On Windows a thread's CPU time advances in
+    # 15.6 ms scheduler ticks, and with random interleaving each repetition runs
+    # for a few tens of milliseconds, so cpu_time is quantized to a large
+    # fraction of what it measures. Over 512 benchmark-samples from sixteen
+    # sampler jobs its CV had a p90 of 16.9% and a maximum of 107% -- one
+    # repetition recorded no CPU time at all and made items_per_second
+    # infinite. real_time over the same repetitions: p90 2.9%, maximum 10.2%.
+    # The values that kept recurring exactly across CI runs (559.241 M/s and
+    # the like) were those quantization steps. These benchmarks are single
+    # threaded and never sleep, so wall-clock time is the quantity anyway.
+    #
+    # items_per_second is N / cpu_time for every repetition, a monotone map, so
+    # with an odd repetition count N = median(ips) * median(cpu_time) exactly,
+    # and the wall-clock throughput median is N / median(real_time).
+    $candidateCv = 100.0 * [double]$candidateCvResult.real_time
+    $baselineCv = 100.0 * [double]$baselineCvResult.real_time
+    $candidateTime = Convert-TimeToNanoseconds -Value $candidate.real_time -Unit $candidate.time_unit
+    $baselineTime = Convert-TimeToNanoseconds -Value $baseline.real_time -Unit $baseline.time_unit
     if ($comparison.Metric -eq 'latency') {
-        $candidateCv = 100.0 * [double]$candidateCvResult.cpu_time
-        $baselineCv = 100.0 * [double]$baselineCvResult.cpu_time
-        $candidateValue = Convert-TimeToNanoseconds -Value $candidate.cpu_time -Unit $candidate.time_unit
-        $baselineValue = Convert-TimeToNanoseconds -Value $baseline.cpu_time -Unit $baseline.time_unit
+        $candidateValue = $candidateTime
+        $baselineValue = $baselineTime
         $regression = (($candidateValue / $baselineValue) - 1.0) * 100.0
         $display = '{0:N3} ns vs {1:N3} ns' -f $candidateValue, $baselineValue
     } else {
-        $candidateCv = 100.0 * [double]$candidateCvResult.items_per_second
-        $baselineCv = 100.0 * [double]$baselineCvResult.items_per_second
-        $candidateValue = [double]$candidate.items_per_second
-        $baselineValue = [double]$baseline.items_per_second
+        $candidateItems = [double]$candidate.items_per_second *
+            (Convert-TimeToNanoseconds -Value $candidate.cpu_time -Unit $candidate.time_unit) * 1.0e-9
+        $baselineItems = [double]$baseline.items_per_second *
+            (Convert-TimeToNanoseconds -Value $baseline.cpu_time -Unit $baseline.time_unit) * 1.0e-9
+        $candidateValue = $candidateItems / ($candidateTime * 1.0e-9)
+        $baselineValue = $baselineItems / ($baselineTime * 1.0e-9)
         $regression = (1.0 - ($candidateValue / $baselineValue)) * 100.0
         $display = '{0:N3} M/s vs {1:N3} M/s' -f ($candidateValue / 1.0e6), ($baselineValue / 1.0e6)
     }
