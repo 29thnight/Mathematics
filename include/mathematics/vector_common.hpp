@@ -337,7 +337,16 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr vector_type normalize(vector_
         // costs more than it saves. The degenerate cases become branches rather
         // than selects, and they predict essentially perfectly -- a scene's
         // vectors are not usually zero-length or infinite.
-        const float squared_length = length_sq(v);
+        //
+        // That includes the length. length_sq(v) would promote v to a register
+        // for a dot product, and v usually arrives here in scalar registers:
+        // the promotion costs more than three multiplies, and on MSVC before
+        // 19.50 it also takes v's address and spills it. From the members,
+        // vector3 normalize measured 11% faster on MSVC 19.44, 16% on 19.51
+        // and 9% on clang-cl, at every code placement tried (docs/BASELINE.md
+        // section 13).
+        float squared_length = v.x * v.x + v.y * v.y;
+        if constexpr (vector_type::lane_count == 3) squared_length += v.z * v.z;
         if (squared_length == 0.0f) return vector_type{};
         if (squared_length == consteval_ops::infinity) {
             return vector_type{consteval_ops::quiet_nan};
