@@ -192,8 +192,9 @@ endif()
 # an empty loop on clang-cl and reported DirectXMath at 2.8 G slerps a second,
 # under one cycle each. Mathematics survives the assumption (its infinity and
 # NaN guards are folded away, not the functions around them), but a comparison
-# in which one side computes nothing is not a comparison. MSVC's /fp:fast makes
-# no such assumption, so this also brings clang's "fast" closer to MSVC's.
+# in which one side computes nothing is not a comparison. MSVC's /fp:fast also
+# relaxes special-value semantics, but in practice it did not delete this code:
+# the same comparison measures real work under MSVC.
 add_library(mathematics_fp_fast INTERFACE)
 add_library(mathematics_fp_precise INTERFACE)
 
