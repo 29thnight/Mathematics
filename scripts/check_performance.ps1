@@ -16,7 +16,19 @@ param(
     [string]$MinTime = '0.4s',
 
     [ValidateRange(3, 99)]
-    [int]$Repetitions = 9
+    [int]$Repetitions = 9,
+
+    # Gate runs the five comparisons CI blocks on. Full adds the rest of the
+    # docs/PLAN.md 4.2 table, the one the release criterion is written against,
+    # as report-only rows.
+    [ValidateSet('Gate', 'Full')]
+    [string]$Table = 'Gate',
+
+    # Measure and report, never fail on a regression. For sampling runs, whose
+    # job is to collect numbers across runners and layouts, not to judge them.
+    # A benchmark that errors still throws -- a sample that failed to measure is
+    # not a sample -- but an unstable row is labelled rather than fatal.
+    [switch]$ReportOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,6 +104,44 @@ $comparisons = @(
         Tolerance = 20.0
     }
 )
+
+# The rest of the docs/PLAN.md 4.2 table. Tolerance $null means the row is
+# measured and reported but never judged: these are the items the release
+# criterion names and the gate does not yet enforce, and the point of running
+# them is to have their numbers from the same runs, on the same runners, as the
+# five that are enforced.
+if ($Table -eq 'Full') {
+    $comparisons += @(
+        [pscustomobject]@{ Label = 'Add latency'; Metric = 'latency'; Tolerance = $null
+            Candidate = 'bm_mathematics_add_latency'; Baseline = 'bm_dx_math_add_latency' },
+        [pscustomobject]@{ Label = 'Mul-add latency'; Metric = 'latency'; Tolerance = $null
+            Candidate = 'bm_mathematics_mul_add_latency'; Baseline = 'bm_dx_math_mul_add_latency' },
+        [pscustomobject]@{ Label = 'Mul-add throughput'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_mul_add_throughput'; Baseline = 'bm_dx_math_mul_add_throughput' },
+        [pscustomobject]@{ Label = 'Dot3 latency'; Metric = 'latency'; Tolerance = $null
+            Candidate = 'bm_mathematics_dot3_latency'; Baseline = 'bm_dx_math_dot3_latency' },
+        [pscustomobject]@{ Label = 'Dot4 latency'; Metric = 'latency'; Tolerance = $null
+            Candidate = 'bm_mathematics_dot4_latency'; Baseline = 'bm_dx_math_dot4_latency' },
+        [pscustomobject]@{ Label = 'Vector3 normalize throughput'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_vector3_normalize_throughput'
+            Baseline = 'bm_dx_math_vector3_normalize_throughput' },
+        [pscustomobject]@{ Label = 'Matrix4x4 multiply latency'; Metric = 'latency'; Tolerance = $null
+            Candidate = 'bm_mathematics_matrix4x4_multiply_latency'
+            Baseline = 'bm_dx_math_matrix4x4_multiply_latency' },
+        [pscustomobject]@{ Label = 'Matrix4x4 multiply throughput'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_matrix4x4_multiply_throughput'
+            Baseline = 'bm_dx_math_matrix4x4_multiply_throughput' },
+        [pscustomobject]@{ Label = 'Matrix4x4 inverse'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_matrix4x4_inverse'; Baseline = 'bm_dx_math_matrix4x4_inverse' },
+        [pscustomobject]@{ Label = 'Quaternion slerp'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_quaternion_slerp'; Baseline = 'bm_dx_math_quaternion_slerp' },
+        # Asymmetric, see docs/BASELINE.md 8: a compile-time count against a
+        # library call that cannot specialize on it. The ratio flatters us.
+        [pscustomobject]@{ Label = 'Batch transform (asymmetric)'; Metric = 'throughput'; Tolerance = $null
+            Candidate = 'bm_mathematics_transform_point_stream'
+            Baseline = 'bm_dx_math_transform_coord_stream' }
+    )
+}
 
 $benchmarkNames = @($comparisons | ForEach-Object { $_.Candidate; $_.Baseline })
 $filter = '^(' + (($benchmarkNames | Sort-Object -Unique) -join '|') + ')$'
@@ -200,15 +250,29 @@ foreach ($comparison in $comparisons) {
         throw "Benchmark '$($comparison.Label)' returned a non-positive metric."
     }
 
-    if ($candidateCv -gt $MaxCvPercent -or $baselineCv -gt $MaxCvPercent) {
+    $gated = ($null -ne $comparison.Tolerance) -and -not $ReportOnly
+    $unstable = $candidateCv -gt $MaxCvPercent -or $baselineCv -gt $MaxCvPercent
+    if ($unstable -and $gated) {
         throw ('Unstable sample for {0}: CV {1:N2}% vs {2:N2}% exceeds {3:N2}%.' -f
             $comparison.Label, $candidateCv, $baselineCv, $MaxCvPercent)
     }
 
-    $tolerance = [double]$comparison.Tolerance
-    $status = if ($regression -gt $tolerance) { 'FAIL' } else { 'PASS' }
-    Write-Host ('[{0}] {1}: {2}; regression {3:N2}% of {4:N0}% allowed; CV {5:N2}%/{6:N2}%' -f
-        $status, $comparison.Label, $display, $regression, $tolerance, $candidateCv, $baselineCv)
+    # A report-only row is printed with the bar it would face if it were gated,
+    # or none, and never changes the outcome. A noisy one is kept and labelled:
+    # dropping it would lose the rest of an otherwise good sample.
+    if ($unstable) {
+        $status = 'NOISY'
+    } elseif ($null -eq $comparison.Tolerance) {
+        $status = 'INFO'
+    } elseif ($regression -gt [double]$comparison.Tolerance) {
+        $status = if ($gated) { 'FAIL' } else { 'OVER' }
+    } else {
+        $status = 'PASS'
+    }
+    $bar = if ($null -eq $comparison.Tolerance) { 'report only' } else {
+        '{0:N0}% allowed' -f [double]$comparison.Tolerance }
+    Write-Host ('[{0}] {1}: {2}; regression {3:N2}% ({4}); CV {5:N2}%/{6:N2}%' -f
+        $status, $comparison.Label, $display, $regression, $bar, $candidateCv, $baselineCv)
     if ($status -eq 'FAIL') {
         $failed = $true
     }
@@ -218,4 +282,5 @@ if ($failed) {
     throw "Performance regression exceeded the per-comparison tolerance. JSON: $outputFullPath"
 }
 
-Write-Host "Performance gate passed. JSON: $outputFullPath"
+$verb = if ($ReportOnly) { 'Performance sample recorded' } else { 'Performance gate passed' }
+Write-Host "$verb. JSON: $outputFullPath"

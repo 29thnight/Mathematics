@@ -1,0 +1,82 @@
+name: Performance sample
+
+# Dispatch only, and gates nothing. It draws the whole docs/PLAN.md 4.2 table --
+# the one the release criterion is written against -- across several runners
+# and several .text layouts in one go, to answer what a single CI run cannot:
+# how far a row moves when only the runner changes, and how far when only the
+# layout does. docs/BASELINE.md 8 and 10 record why both move.
+#
+# Each job records the CPU model, the compilers and the shift alongside the
+# benchmark JSON, so hardware no longer has to be inferred from cache sizes.
+#
+#   gh workflow run perf-sample.yml -f replicas='[1,2]'
+
+on:
+  workflow_dispatch:
+    inputs:
+      replicas:
+        description: JSON list; one job per compiler x shift x entry
+        default: '[1]'
+
+# Its own group: a sampling run must neither cancel CI nor be cancelled by it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sample:
+    name: ${{ matrix.preset }} shift ${{ matrix.shift }} r${{ matrix.replica }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [msvc-release, clang-release]
+        # bench/layout_shift.cpp: bytes ahead of all code, multiples of 16.
+        shift: [0, 16, 32, 48]
+        replica: ${{ fromJSON(inputs.replicas) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DMATHEMATICS_BENCH_TEXT_SHIFT=${{ matrix.shift }}
+          -DMATHEMATICS_BUILD_TESTS=OFF
+          -DMATHEMATICS_BUILD_TOOLS=OFF
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --target mathematics_bench
+
+      - name: Sample
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\sample"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $bench = "$env:LOCALAPPDATA\MathematicsBuild\${{ matrix.preset }}\bench\mathematics_bench.exe"
+          # What the benchmark JSON does not carry.
+          [pscustomobject]@{
+            preset   = '${{ matrix.preset }}'
+            shift    = ${{ matrix.shift }}
+            replica  = ${{ matrix.replica }}
+            sha      = '${{ github.sha }}'
+            run_id   = '${{ github.run_id }}'
+            runner   = $env:RUNNER_NAME
+            cpu      = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim()
+            cl       = ((& cl 2>&1 | Select-Object -First 1) -replace '.*Version ([0-9.]+).*', '$1')
+            clang_cl = ((& clang-cl --version 2>&1 | Select-Object -First 1) -replace '.*version ([0-9.]+).*', '$1')
+            entry    = ((& dumpbin /headers $bench | Select-String 'entry point') -replace '^\s*([0-9A-F]+).*', '$1')
+          } | ConvertTo-Json | Set-Content "$out\context.json"
+          Get-Content "$out\context.json"
+          ./scripts/check_performance.ps1 -BenchmarkExe $bench `
+            -OutputPath "$out\benchmark.json" -Table Full -ReportOnly
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sample-${{ matrix.preset }}-s${{ matrix.shift }}-r${{ matrix.replica }}
+          path: ${{ runner.temp }}\sample
+          if-no-files-found: warn

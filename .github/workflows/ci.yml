@@ -76,10 +76,15 @@ jobs:
         if: matrix.preset == 'msvc-release' || matrix.preset == 'clang-release'
         shell: pwsh
         run: |
+          # Full: all of docs/PLAN.md 4.2 is measured and lands in the uploaded
+          # JSON on every run. Only the five rows that carry a tolerance block;
+          # the rest are report-only until the release criterion says how
+          # they should be judged on hosted runners (docs/OPEN-ISSUES.md 1).
           $gate = @{
             BenchmarkExe = "$env:LOCALAPPDATA\MathematicsBuild\${{ matrix.preset }}\bench\mathematics_bench.exe"
             OutputPath = "$env:RUNNER_TEMP\mathematics-performance-${{ matrix.preset }}.json"
             MaxRegressionPercent = 5
+            Table = 'Full'
           }
           foreach ($attempt in 1..2) {
             try {
