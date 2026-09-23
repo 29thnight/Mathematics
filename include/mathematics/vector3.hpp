@@ -36,23 +36,38 @@ struct vector3 {
         // Clang otherwise reloads y/z across the 8+4-byte store boundary in a
         // dependent chain, defeating store-to-load forwarding.
         //
-        // MSVC stays on set, and it was taken off it once, briefly, at real
-        // cost. load3 reads through the object's address. When MSVC is holding
-        // the vector in three scalar registers -- which it does wherever the
-        // caller also touches .x, .y and .z, normalize() being the case that
-        // was measured -- taking that address makes it spill the lanes with
-        // 4-byte stores and read them straight back with an 8-byte load. A
-        // load that spans two stores cannot be forwarded, so every element
-        // waits for both to reach L1: vector3 normalize went from 373 to 69
-        // M/s on 19.51, 4.1x behind DirectXMath. set takes values and never
-        // needs the address.
-        //
-        // The trade is real and recorded in docs/BASELINE.md section 11: on
-        // 19.44, set from memory assembles each operand in seven instructions,
-        // and cross throughput on the runner pays for it. That is a slower
-        // loop on the older toolset; the stall was a 5x hole on the current
-        // one, in a function every scene graph calls.
+        // MSVC 19.50 and later stay on set; they were taken off it once,
+        // briefly, at real cost. load3 reads through the object's address.
+        // When MSVC is holding the vector in three scalar registers -- which it
+        // does wherever the caller also touches .x, .y and .z, normalize()
+        // being the case that was measured -- taking that address makes it
+        // spill the lanes with 4-byte stores and read them straight back with
+        // an 8-byte load. A load that spans two stores cannot be forwarded, so
+        // every element waits for both to reach L1: vector3 normalize went from
+        // 373 to 69 M/s on 19.51, 4.1x behind DirectXMath (docs/BASELINE.md
+        // section 11). set takes values and never needs the address. Older
+        // MSVC is the next branch.
         return load3(static_cast<const void*>(this));
+#elif MATHEMATICS_COMPILER_MSVC && MATHEMATICS_SIMD_SSE && _MSC_VER < 1950
+        // Visual Studio 2022's compilers do not fold set into a packed load:
+        // 19.44 assembles each operand in seven instructions, and cross
+        // throughput ran 30% behind DirectXMath on the reference machine (65%
+        // on 19.38). This is XMLoadFloat3's own form -- one 8-byte load, one
+        // insert -- and it is the one of the three packed spellings measured
+        // that keeps every vector3 row ahead of DirectXMath on 19.44: cross
+        // 447 vs 549 ns per batch, normalize 1571 vs 1823, the transform stream
+        // 675 vs 768. The spill-and-reload stall described above did not
+        // appear on these versions. It is not for 19.50 and later, where set
+        // is already packed and this costs normalize 13%, nor safe to hand
+        // them: this spelling stopped 19.51 compiling frustum_test.cpp.
+        // docs/BASELINE.md section 13.
+        const __m128 xy =
+            _mm_castpd_ps(_mm_load_sd(reinterpret_cast<const double*>(&x)));
+#  if MATHEMATICS_HAS_SSE4
+        return vec_reg{_mm_insert_ps(xy, _mm_load_ss(&z), 0x20)};
+#  else
+        return vec_reg{_mm_movelh_ps(xy, _mm_load_ss(&z))};
+#  endif
 #else
         return set(x, y, z, 0.0f);
 #endif

@@ -13,7 +13,9 @@
 - **정확성:** 로컬 5개 구성(MSVC AVX2·SSE2·scalar·C++20, clang-cl)에서 340개 테스트 통과.
 - **릴리스 판정:** 통과 (2026-09-23). §4.2의 ±5%를 기준 기계(i7-8700K)에서 MSVC 19.51과
   clang-cl 22.1.3으로 판정해 16행 전부가 두 컴파일러에서 5% 안이다
-  ([BASELINE §12](BASELINE.md)). 게이트가 열린 채로
+  ([BASELINE §12](BASELINE.md)). 1.0.0 뒤에 Visual Studio 2022의 MSVC 19.44도 같은 표로 쟀다.
+  cross 처리량 한 행이 +30.5% 뒤져 있었고, 이를 고쳐 16행 전부가 통과한다
+  ([BASELINE §13](BASELINE.md)). 게이트가 열린 채로
   [v0.1.0](https://github.com/29thnight/Mathematics/releases/tag/v0.1.0)을 pre-release로
   배포했었고(2026-08-25), 1.0.0이 기준을 통과한 첫 판이다.
 - **자동 게이트:** MSVC·clang-cl에서 5개 latency/throughput 비교를 벽시계 기준으로 DXMath와
