@@ -81,6 +81,57 @@ if(MATHEMATICS_FORCE_SCALAR)
     target_compile_definitions(mathematics INTERFACE MATHEMATICS_FORCE_SCALAR)
 endif()
 
+# ---------------------------------------------------------------- installation
+# find_package(Mathematics) support. Header-only, so the package carries the
+# headers, a target and nothing compiled, and the config goes under the
+# architecture-independent data directory for the same reason. On by default
+# only when this is the top-level project, so an add_subdirectory() consumer
+# does not grow install rules it never asked for.
+option(MATHEMATICS_INSTALL "Generate install rules and a CMake package config"
+    ${MATHEMATICS_IS_TOP_LEVEL})
+
+if(MATHEMATICS_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    # Exported as Mathematics::Mathematics, the same name the in-tree alias
+    # has, so switching from add_subdirectory to find_package changes nothing
+    # in the consumer's target_link_libraries.
+    set_target_properties(mathematics PROPERTIES EXPORT_NAME Mathematics)
+    install(TARGETS mathematics EXPORT MathematicsTargets)
+    install(DIRECTORY include/mathematics DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    set(MATHEMATICS_INSTALL_CMAKEDIR ${CMAKE_INSTALL_DATADIR}/cmake/Mathematics)
+    install(EXPORT MathematicsTargets
+        NAMESPACE Mathematics::
+        DESTINATION ${MATHEMATICS_INSTALL_CMAKEDIR})
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MathematicsConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/MathematicsConfig.cmake
+        INSTALL_DESTINATION ${MATHEMATICS_INSTALL_CMAKEDIR})
+
+    # Semantic versioning's own rule: below 1.0 a minor bump may break, so a
+    # 0.x consumer asking for 0.2 must not be handed 0.3. From 1.0 the major
+    # version carries that promise instead.
+    if(PROJECT_VERSION_MAJOR EQUAL 0)
+        set(MATHEMATICS_VERSION_COMPATIBILITY SameMinorVersion)
+    else()
+        set(MATHEMATICS_VERSION_COMPATIBILITY SameMajorVersion)
+    endif()
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/MathematicsConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY ${MATHEMATICS_VERSION_COMPATIBILITY}
+        ARCH_INDEPENDENT)
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/MathematicsConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/MathematicsConfigVersion.cmake
+        DESTINATION ${MATHEMATICS_INSTALL_CMAKEDIR})
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/Mathematics)
+endif()
+
 # ------------------------------------------------------- shared build settings
 # Applied to our own targets only, never propagated to consumers of mathematics.
 add_library(mathematics_build_settings INTERFACE)

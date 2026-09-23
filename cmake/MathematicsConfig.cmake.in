@@ -1,0 +1,13 @@
+# Package configuration for find_package(Mathematics).
+#
+# The library is header-only, so this carries no binaries and no build options:
+# it defines Mathematics::Mathematics with the include directory and the C++20
+# floor, which is all a consumer needs. The language standard of the consumer's
+# own target is the consumer's choice -- but read the README before settling on
+# C++20 with MSVC.
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/MathematicsTargets.cmake")
+
+check_required_components(Mathematics)

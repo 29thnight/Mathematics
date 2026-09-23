@@ -184,6 +184,50 @@ jobs:
           path: ${{ runner.temp }}/mathematics-coverage.xml
           if-no-files-found: warn
 
+  # What a find_package() consumer actually receives. Install to a scratch
+  # prefix, then build tests/package -- its own project, which never sees the
+  # source tree -- against the install alone. Every other job consumes the
+  # library through the build interface, so without this a broken install
+  # would ship with a green CI.
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            generator: ''
+          - os: windows-2022
+            generator: '-G Ninja'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+
+      - name: Install to a scratch prefix
+        shell: bash
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/build" ${{ matrix.generator }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMATHEMATICS_BUILD_TESTS=OFF \
+            -DMATHEMATICS_BUILD_BENCH=OFF \
+            -DMATHEMATICS_BUILD_TOOLS=OFF
+          cmake --install "$RUNNER_TEMP/build" --prefix "$RUNNER_TEMP/prefix"
+          find "$RUNNER_TEMP/prefix" -type f | sort
+
+      - name: Build and run a consumer against the install
+        shell: bash
+        run: |
+          cmake -S tests/package -B "$RUNNER_TEMP/consumer" ${{ matrix.generator }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          cmake --build "$RUNNER_TEMP/consumer"
+          ctest --test-dir "$RUNNER_TEMP/consumer" --output-on-failure
+
   # ARM64/NEON coverage. The SSE and NEON backends are separate code paths, so
   # without this the NEON path would ship untested.
   linux-arm64:
