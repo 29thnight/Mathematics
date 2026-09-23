@@ -182,20 +182,35 @@ endif()
 # accurate than the intrinsics under test. Both were observed here: MSVC
 # diverging ~8 ULP on add, clang ~2 ULP on div. Mathematics' own runtime paths are
 # explicit intrinsics and are unaffected by either setting.
+#
+# Fast keeps one exception: -ffinite-math-only, which clang's /fp:fast and every
+# -ffast-math include, is turned back off. It declares infinities and NaNs
+# impossible, and DirectXMath's XMVectorATan2 handles its special cases by
+# comparing against infinity; under that assumption clang proves the code
+# cannot run and deletes it -- the enclosing loop with it, stores and memory
+# barriers included. XMQuaternionSlerp calls it, so the slerp comparison timed
+# an empty loop on clang-cl and reported DirectXMath at 2.8 G slerps a second,
+# under one cycle each. Mathematics survives the assumption (its infinity and
+# NaN guards are folded away, not the functions around them), but a comparison
+# in which one side computes nothing is not a comparison. MSVC's /fp:fast makes
+# no such assumption, so this also brings clang's "fast" closer to MSVC's.
 add_library(mathematics_fp_fast INTERFACE)
 add_library(mathematics_fp_precise INTERFACE)
 
 if(MSVC)
     target_compile_options(mathematics_fp_fast INTERFACE /fp:fast)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(mathematics_fp_fast INTERFACE /clang:-fno-finite-math-only)
+    endif()
     target_compile_options(mathematics_fp_precise INTERFACE /fp:precise)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(mathematics_fp_fast INTERFACE -ffast-math)
+    target_compile_options(mathematics_fp_fast INTERFACE -ffast-math -fno-finite-math-only)
     target_compile_options(mathematics_fp_precise INTERFACE -ffp-model=precise)
 else()
     # GCC has no -ffp-model=; it rejects the flag outright. The two behaviours
     # the tests actually depend on -- no FMA contraction and no reciprocal
     # approximation for division -- are spelled separately here.
-    target_compile_options(mathematics_fp_fast INTERFACE -ffast-math)
+    target_compile_options(mathematics_fp_fast INTERFACE -ffast-math -fno-finite-math-only)
     target_compile_options(mathematics_fp_precise INTERFACE
         -fno-fast-math -ffp-contract=off)
 endif()
