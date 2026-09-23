@@ -1,7 +1,17 @@
 include(${CMAKE_SOURCE_DIR}/cmake/Dependencies.cmake)
 mathematics_fetch_benchmark()
 
-add_executable(mathematics_bench baseline_bench.cpp)
+# Placement sampling only; see layout_shift.cpp. Zero builds the ordinary binary.
+# When set, layout_shift.cpp must be the first source: contributions to the same
+# section keep link order, and the padding has to precede every benchmark.
+set(MATHEMATICS_BENCH_TEXT_SHIFT 0 CACHE STRING
+    "Bytes to shift the benchmark's .text by, for placement sampling (0 = none)")
+set(mathematics_bench_sources baseline_bench.cpp)
+if(MSVC AND MATHEMATICS_BENCH_TEXT_SHIFT GREATER 0)
+    list(PREPEND mathematics_bench_sources layout_shift.cpp)
+endif()
+
+add_executable(mathematics_bench ${mathematics_bench_sources})
 target_link_libraries(mathematics_bench
     PRIVATE mathematics mathematics_build_settings mathematics_fp_fast benchmark::benchmark)
 
@@ -12,6 +22,11 @@ target_link_libraries(mathematics_aabb_bench
 add_executable(mathematics_easing_tween_bench easing_tween_bench.cpp)
 target_link_libraries(mathematics_easing_tween_bench
     PRIVATE mathematics mathematics_build_settings mathematics_fp_fast benchmark::benchmark)
+
+if(MSVC AND MATHEMATICS_BENCH_TEXT_SHIFT GREATER 0)
+    target_compile_definitions(mathematics_bench PRIVATE
+        MATHEMATICS_BENCH_TEXT_SHIFT=${MATHEMATICS_BENCH_TEXT_SHIFT})
+endif()
 
 if(MATHEMATICS_HAVE_DIRECTXMATH)
     target_compile_definitions(mathematics_bench PRIVATE MATHEMATICS_BENCH_HAS_DXMATH=1)
