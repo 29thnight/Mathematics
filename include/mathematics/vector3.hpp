@@ -32,24 +32,26 @@ struct vector3 {
         // Deliberately not a 16-byte load of &x: the object is twelve bytes, so
         // that would read past the end and can fault at a page boundary.
         MATHEMATICS_IF_CONSTEVAL { return set(x, y, z, 0.0f); }
-#if MATHEMATICS_SIMD_SSE && !MATHEMATICS_COMPILER_GCC
+#if MATHEMATICS_COMPILER_CLANG && MATHEMATICS_SIMD_SSE
         // Clang otherwise reloads y/z across the 8+4-byte store boundary in a
         // dependent chain, defeating store-to-load forwarding.
         //
-        // MSVC used to be excluded here, on the grounds that it built a better
-        // register out of set. That was read off a 19.51 listing, where set
-        // does fold into this same movsd + vinsertps pair and the exclusion
-        // therefore cost nothing. The runner compiles with 19.44, and there it
-        // does not fold: it splats y, zeroes two registers and assembles the
-        // lanes one at a time, seven instructions per operand against two.
-        // cross reads two operands, so fourteen instructions an element went
-        // into loads that DirectXMath spends four on -- which is the whole of
-        // the throughput gap docs/BASELINE.md section 10 records, and the
-        // reason the store3 fix moved cross latency without moving cross
-        // throughput. The loop was never store-bound; it was load-bound.
+        // MSVC stays on set, and it was taken off it once, briefly, at real
+        // cost. load3 reads through the object's address. When MSVC is holding
+        // the vector in three scalar registers -- which it does wherever the
+        // caller also touches .x, .y and .z, normalize() being the case that
+        // was measured -- taking that address makes it spill the lanes with
+        // 4-byte stores and read them straight back with an 8-byte load. A
+        // load that spans two stores cannot be forwarded, so every element
+        // waits for both to reach L1: vector3 normalize went from 373 to 69
+        // M/s on 19.51, 4.1x behind DirectXMath. set takes values and never
+        // needs the address.
         //
-        // GCC keeps set: nothing here has measured it, and no gate would catch
-        // a regression on that path.
+        // The trade is real and recorded in docs/BASELINE.md section 11: on
+        // 19.44, set from memory assembles each operand in seven instructions,
+        // and cross throughput on the runner pays for it. That is a slower
+        // loop on the older toolset; the stall was a 5x hole on the current
+        // one, in a function every scene graph calls.
         return load3(static_cast<const void*>(this));
 #else
         return set(x, y, z, 0.0f);

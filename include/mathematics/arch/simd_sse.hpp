@@ -82,22 +82,19 @@ MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load(const flo
 // while float-pointer arithmetic across distinct members would be undefined.
 // The 8+4-byte split matches vector3's stores and enables forwarding in chains.
 //
-// The memcpy phrasing is load-bearing, and not for a reason the code shows.
-// Both obvious improvements on it stop 19.51 from compiling: _mm_loadl_epi64
-// through __m128i*, which is the exact mirror of store3 below, and
-// _mm_load_sd through double*, which is what XMLoadFloat3 uses. Each ran
-// tests/frustum_test.cpp past its timeout under -std:c++20 /fp:precise -- seven
-// minutes twice for the first, five for the second -- where the form below
-// finishes in thirty-seven seconds. What the two have in common is loading
-// through a pointer-typed intrinsic; materializing the eight bytes as a value
-// first is the only spelling that survives.
+// Only Clang calls this: vector3::reg() explains why MSVC must not, and GCC
+// has never been measured on it.
 //
-// The cost of keeping it: 19.44 spills that value to a stack slot and reads it
-// straight back, three instructions an element it has no use for, which is most
-// of the gap docs/BASELINE.md section 10 leaves open. How much either
-// alternative would actually recover there is unmeasured and unmeasurable --
-// neither finishes compiling here, so neither can be put in front of the
-// runner's compiler at all.
+// Two warnings for whoever next considers widening that. First, taking the
+// object's address is the cost: a compiler holding the vector in scalar
+// registers has to spill it lane by lane to hand this function a pointer, and
+// the 8-byte read then spans two 4-byte stores and cannot be forwarded. That
+// is what took MSVC's vector3 normalize from 373 to 69 M/s (docs/BASELINE.md
+// section 11). Second, the memcpy phrasing is load-bearing on MSVC even so:
+// both obvious alternatives -- _mm_loadl_epi64 through __m128i*, the mirror of
+// store3 below, and _mm_load_sd through double*, which XMLoadFloat3 uses --
+// stopped 19.51 compiling tests/frustum_test.cpp under -std:c++20 /fp:precise,
+// past five and seven minutes where this form takes thirty-seven seconds.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE vec_reg MATHEMATICS_CALL load3(const void* object) noexcept {
     const auto* bytes = static_cast<const unsigned char*>(object);
     std::uint64_t xy_bits;
