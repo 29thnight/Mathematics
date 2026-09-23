@@ -41,22 +41,42 @@ if(MATHEMATICS_ENABLE_COVERAGE)
     # this, a header-only API could disappear from both numerator and
     # denominator and make the percentage look healthier than it is.
     #
-    # -fkeep-inline-functions applies to every inline definition the translation
-    # unit sees, libstdc++'s included, and GCC 13's <cmath> has two that do not
-    # link. std::nextafter for std::float16_t and std::bfloat16_t open with
-    #
-    #     if consteval { return __builtin_nextafterf16(__x, __y); }
-    #
-    # whose own comment says the branch exists because "nothing defines
-    # nextafterf16" -- and at -O0 that branch survives into the object file, so
-    # the link fails on nextafterf16 and __builtin_nextafterf16b. Nothing here
-    # uses either type; both <cmath> blocks are gated on the C++23 predefined
-    # macros, so cancelling them removes the broken definitions and leaves the
-    # rest of C++23 (mdspan, m[r, c], if consteval) instrumented as before.
-    # Fixed in neither GCC 13 nor 14; drop this when the runner's GCC has it.
     target_compile_options(mathematics_tests PRIVATE
-        --coverage -fprofile-abs-path -fkeep-inline-functions -O0 -g
-        -U__STDCPP_FLOAT16_T__ -U__STDCPP_BFLOAT16_T__)
+        --coverage -fprofile-abs-path -fkeep-inline-functions -O0 -g)
+
+    # -fkeep-inline-functions applies to every inline definition the translation
+    # unit sees, libstdc++'s included, and some libstdc++ releases have two in
+    # <cmath> that do not link that way. std::nextafter for std::float16_t and
+    # std::bfloat16_t began
+    #
+    #     if (std::__is_constant_evaluated())
+    #       return __builtin_nextafterf16(__x, __y);
+    #
+    # and at -O0 that branch is emitted as an ordinary call, to nextafterf16 and
+    # __builtin_nextafterf16b, which nothing defines. libstdc++ PR117321 changed
+    # both to `if consteval`, whose branch never reaches code generation: the
+    # fix is in GCC 13.4, 14.3 and 15.1, while ubuntu-24.04 ships 13.3 and 14.2.
+    #
+    # So ask the toolchain rather than its version number -- a distribution may
+    # patch without renumbering. When <cmath> does not link under these flags,
+    # cancel the two predefined macros that gate those blocks. Nothing here uses
+    # either type, and the rest of C++23 (mdspan, m[r, c], if consteval) stays
+    # instrumented. On a fixed toolchain the probe links and nothing is removed.
+    include(CheckCXXSourceCompiles)
+    include(CMakePushCheckState)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_FLAGS "-O0 -fkeep-inline-functions")
+    check_cxx_source_compiles(
+        "#include <cmath>\nint main() { return 0; }"
+        MATHEMATICS_CMATH_LINKS_WITH_KEPT_INLINES)
+    cmake_pop_check_state()
+    if(NOT MATHEMATICS_CMATH_LINKS_WITH_KEPT_INLINES)
+        message(STATUS "Coverage: <cmath> does not link with "
+                       "-fkeep-inline-functions (libstdc++ PR117321); "
+                       "cancelling __STDCPP_FLOAT16_T__ / __STDCPP_BFLOAT16_T__")
+        target_compile_options(mathematics_tests PRIVATE
+            -U__STDCPP_FLOAT16_T__ -U__STDCPP_BFLOAT16_T__)
+    endif()
     # Turns MATHEMATICS_INLINE back into the plain keyword; see config.hpp for
     # why always_inline and -fkeep-inline-functions together make a function's
     # signature line permanently uncoverable.

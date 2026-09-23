@@ -1,5 +1,7 @@
 #include <mathematics/tween_views.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -103,4 +105,42 @@ TEST(tween_views, fused_and_composed_forms_agree) {
 
     for (std::size_t index = 0; index < progress.size(); ++index)
         EXPECT_EQ(composed[index], fused[index]);
+}
+
+// --------------------------------------------------------- direct call forms
+// The adaptors are called with the range as the first argument as well as
+// piped; and a run-time range keeps the whole pipeline out of the constant
+// evaluator, which otherwise folds a constexpr array's pipeline away.
+TEST(tween_views, direct_call_forms_match_the_piped_forms) {
+    std::vector<float> input =
+        math_test::runtime_value(std::vector<float>{0.0f, 0.25f, 0.5f, 1.0f});
+
+    auto eased = math::views::ease(input, math::easing::quadratic_in);
+    auto piped = input | math::views::ease(math::easing::quadratic_in);
+    ASSERT_EQ(eased.size(), piped.size());
+    for (std::size_t i = 0; i < input.size(); ++i) EXPECT_EQ(eased[i], piped[i]);
+
+    auto fused = math::views::tween(input, 0.0f, 8.0f, math::easing::quadratic_in,
+                                    math::interpolation::linear);
+    auto fused_piped = input | math::views::tween(0.0f, 8.0f,
+                                                  math::easing::quadratic_in,
+                                                  math::interpolation::linear);
+    auto defaulted = input | math::views::tween(0.0f, 8.0f);
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        EXPECT_FLOAT_EQ(fused[i], 8.0f * eased[i]);
+        EXPECT_EQ(fused[i], fused_piped[i]);
+        EXPECT_FLOAT_EQ(defaulted[i], 8.0f * input[i]);
+    }
+}
+
+TEST(tween_views, nlerp_closure_normalizes_each_step) {
+    const std::vector<float> input =
+        math_test::runtime_value(std::vector<float>{0.0f, 0.5f, 1.0f});
+    const math::quaternion from = math::quaternion::identity();
+    const math::quaternion to = math::quaternion_from_axis_angle(
+        math::vector3{0.0f, 0.0f, 1.0f}, math::half_pi);
+    auto rotations = input | math::views::nlerp(from, to);
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        EXPECT_EQ(rotations[i], math::nlerp(from, to, input[i]));
+    }
 }

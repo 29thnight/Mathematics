@@ -1,7 +1,11 @@
 #include <mathematics/tween.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <limits>
 #include <type_traits>
 #include <vector>
 
@@ -181,4 +185,53 @@ TEST(tween_ownership, copies_and_vector_reallocation_are_independent) {
     manager.push_back(copy); // forces ordinary value relocation
     EXPECT_FLOAT_EQ(manager[0].sample(), 2.5f);
     EXPECT_FLOAT_EQ(manager[1].sample(), 7.5f);
+}
+
+// ------------------------------------------------------ run-time policies
+TEST(tween_value, clamped_forms_hold_the_endpoints_outside_zero_to_one) {
+    const float from = math_test::runtime_value(2.0f);
+    EXPECT_FLOAT_EQ(math::tween_value_clamped(from, 6.0f, 1.5f), 6.0f);
+    EXPECT_FLOAT_EQ(math::tween_value_clamped(from, 6.0f, -0.5f), 2.0f);
+    EXPECT_FLOAT_EQ(math::tween_value_clamped(from, 6.0f, 0.5f,
+                                              math::easing::quadratic_in),
+                    3.0f);
+    EXPECT_EQ(math::tween_value_clamped(
+                  math::vector2{0.0f, 0.0f}, math::vector2{4.0f, 8.0f}, 3.0f,
+                  math::easing::linear, math::interpolation::linear),
+              math::vector2(4.0f, 8.0f));
+}
+
+TEST(tween_value, normalized_linear_policy_is_nlerp) {
+    const math::quaternion from =
+        math_test::runtime_value(math::quaternion::identity());
+    const math::quaternion to = math::quaternion_from_axis_angle(
+        math::vector3{0.0f, 1.0f, 0.0f}, math::half_pi);
+    EXPECT_EQ(math::tween_value(from, to, 0.3f, math::easing::linear,
+                                math::interpolation::normalized_linear),
+              math::nlerp(from, to, 0.3f));
+}
+
+TEST(tween_state, explicit_interpolator_tween_runs_its_policy) {
+    const math::quaternion from =
+        math_test::runtime_value(math::quaternion::identity());
+    const math::quaternion to = math::quaternion_from_axis_angle(
+        math::vector3{0.0f, 0.0f, 1.0f}, math::half_pi);
+    auto track = math::make_tween(from, to, 2.0f, math::interpolation::spherical);
+    const auto step = track.advance(1.0f);
+    EXPECT_TRUE(math::same_rotation(step.value, math::slerp(from, to, 0.5f), 1e-6f));
+    EXPECT_EQ(step.state, math::tween_state::playing);
+}
+
+// An infinite loop is never clamped to an end time, so elapsed time can run
+// past float's range. It pins at the largest finite value rather than going
+// infinite, which would turn every later progress into NaN.
+TEST(tween_state, infinite_timeline_saturates_instead_of_overflowing) {
+    auto track = math::make_tween(0.0f, 1.0f, math_test::runtime_value(1.0f));
+    track.playback(math::tween_playback::loop).cycles(math::infinite_cycles);
+    const float huge = math_test::runtime_value(3e38f);
+    track.seek(huge);
+    const auto step = track.advance(huge);
+    EXPECT_EQ(track.elapsed_seconds(), std::numeric_limits<float>::max());
+    EXPECT_EQ(step.state, math::tween_state::playing);
+    EXPECT_FALSE(std::isnan(step.value));
 }

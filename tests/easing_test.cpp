@@ -1,5 +1,7 @@
 #include <mathematics/easing.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -178,4 +180,54 @@ TEST(scalar_exp2, matches_standard_library_across_normal_easing_range) {
     EXPECT_FLOAT_EQ(math::exp2(-149.0f), std::exp2(-149.0f));
     EXPECT_FLOAT_EQ(math::exp2(-150.0f), 0.0f);
     EXPECT_TRUE(std::isinf(math::exp2(128.0f)));
+}
+
+// ------------------------------------------------------- in_out mid ranges
+// The endpoint test calls every curve at 0 and 1 only, and the in_out curves
+// return early there, so their two halves are exercised here. Each is point
+// symmetric about (0.5, 0.5): the second half is the first half turned round.
+// For elastic_in_out that is not structure but arithmetic -- the two sine
+// arguments sum to -pi -- so a wrong constant in either half breaks it.
+TEST(easing_shape, in_out_curves_are_point_symmetric_about_the_midpoint) {
+    const std::array<math::easing_function, 3> curves{
+        math::easing::elastic_in_out,
+        math::easing::back_in_out,
+        math::easing::bounce_in_out};
+    for (const math::easing_function curve : curves) {
+        EXPECT_NEAR(curve(math_test::runtime_value(0.5f)), 0.5f, 1e-6f);
+        for (int index = 1; index < 50; ++index) {
+            const float t = static_cast<float>(index) / 100.0f;
+            EXPECT_NEAR(curve(t) + curve(1.0f - t), 1.0f, 2e-5f) << t;
+        }
+    }
+}
+
+// bounce_in_out is bounce_in and bounce_out at double speed, half height.
+// (back_in_out is not built that way: it follows the common definition, whose
+// overshoot constant is 1.525 times back_in's.)
+TEST(easing_shape, bounce_in_out_is_its_in_and_out_halves) {
+    for (int index = 1; index < 50; ++index) {
+        const float t = static_cast<float>(index) / 100.0f;
+        EXPECT_NEAR(math::easing::bounce_in_out(t),
+                    math::easing::bounce_in(2.0f * t) * 0.5f, 2e-5f) << t;
+        EXPECT_NEAR(math::easing::bounce_in_out(1.0f - t),
+                    0.5f + math::easing::bounce_out(1.0f - 2.0f * t) * 0.5f,
+                    2e-5f) << t;
+    }
+}
+
+namespace {
+struct cube_curve {
+    constexpr float operator()(float t) const noexcept { return t * t * t; }
+};
+} // namespace
+
+TEST(easing_function, default_is_linear_and_any_stateless_curve_erases) {
+    const math::easing_function linear =
+        math_test::runtime_value(math::easing_function{});
+    const math::easing_function cube =
+        math_test::runtime_value(math::easing_function{cube_curve{}});
+    const float t = math_test::runtime_value(0.5f);
+    EXPECT_FLOAT_EQ(linear(t), 0.5f);
+    EXPECT_FLOAT_EQ(cube(t), 0.125f);
 }

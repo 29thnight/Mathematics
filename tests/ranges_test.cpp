@@ -1,6 +1,8 @@
 #include <mathematics/ranges.hpp>
 #include <mathematics/views.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -232,4 +234,33 @@ TEST(fixed_extent_view, tuple_protocol_reaches_a_range_without_an_accessor) {
 
     c = -3.0f;
     EXPECT_FLOAT_EQ(storage[2], -3.0f);
+}
+
+// ---------------------------------------------------------- const iteration
+// A const view has its own begin/end and element access, and the transform
+// view's iterator supports the full random-access arithmetic; the range-for
+// tests above only ever step it forward.
+TEST(fixed_range_pipelines, const_transform_view_is_random_access) {
+    const math::vector4 value = math_test::runtime_value(math::vector4{1, 2, 3, 4});
+    const auto doubled = math::components(value) |
+        math::views::transform_fixed([](float c) { return c * 2.0f; });
+
+    EXPECT_EQ(doubled.size(), 4u);
+    EXPECT_EQ(doubled.end() - doubled.begin(), 4);
+    auto it = doubled.begin();
+    it += 2;
+    EXPECT_FLOAT_EQ(*it, 6.0f);
+    EXPECT_FLOAT_EQ(*(doubled.begin() + 3), 8.0f);
+    EXPECT_FLOAT_EQ(doubled.get<1>(), 4.0f);
+
+    // Value-initialized iterators compare equal, as forward iterators must.
+    using iterator = decltype(doubled.begin());
+    EXPECT_TRUE(iterator{} == iterator{});
+}
+
+TEST(fixed_extent_view, const_view_reaches_elements_by_accessor_and_by_range) {
+    const math::vector3 value = math_test::runtime_value(math::vector3{5, 6, 7});
+    const auto components = math::components(value);
+    EXPECT_FLOAT_EQ(components.get<2>(), 7.0f);
+    EXPECT_EQ(components.end() - components.begin(), 3);
 }

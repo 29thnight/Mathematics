@@ -8,6 +8,7 @@
 // floats against sixteen other floats.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/transform.hpp>
 
@@ -390,6 +391,18 @@ TEST(transform_projection, off_center_handles_an_asymmetric_box) {
     EXPECT_TRUE(math::near_equal(project(vector3{3, 5, 1}, p),
                                  vector3{0, 0, 0}, 1e-4f))
         << "the centre of the box maps to the centre of the near face";
+}
+
+// The two tests above pass only literals, which GCC folds at compile time; this
+// one runs the compiled off-center functions.
+TEST(transform_projection, off_center_forms_run_at_run_time) {
+    const float left = math_test::runtime_value(-4.0f);
+    EXPECT_TRUE(math::near_equal(
+        math::orthographic_off_center_lh(left, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f),
+        math::orthographic_lh(8.0f, 6.0f, 1.0f, 51.0f), 1e-5f));
+    EXPECT_TRUE(math::near_equal(
+        math::orthographic_off_center_rh(left, 4.0f, -3.0f, 3.0f, 1.0f, 51.0f),
+        math::orthographic_rh(8.0f, 6.0f, 1.0f, 51.0f), 1e-5f));
 }
 
 // The two ways to spell the same perspective projection.

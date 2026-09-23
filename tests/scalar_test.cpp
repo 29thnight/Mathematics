@@ -11,6 +11,7 @@
 // polynomial over std::sin for it (see the header), so it gets a test.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/scalar.hpp>
 
@@ -228,11 +229,16 @@ TEST(scalar, arc_tangent2_with_both_arguments_infinite) {
 
 // Magnitude ratios whose division overflows to infinity or underflows to zero.
 // Both must land on the axis answers, not on garbage from the intermediate.
+// The inputs arrive at run time: with literals MSVC folds the overflowing
+// division during compilation (warning C4756) and the compiled atan2 never sees
+// it.
 TEST(scalar, arc_tangent2_extreme_magnitude_ratios) {
-    EXPECT_NEAR(math::atan2(1e30f, 1e-30f), math::half_pi, 1e-6f);
-    EXPECT_NEAR(math::atan2(-1e30f, 1e-30f), -math::half_pi, 1e-6f);
-    EXPECT_NEAR(math::atan2(1e-30f, 1e30f), 0.0f, 1e-6f);
-    EXPECT_NEAR(math::atan2(1e-30f, -1e30f), math::pi, 1e-6f);
+    const float big = math_test::runtime_value(1e30f);
+    const float tiny = math_test::runtime_value(1e-30f);
+    EXPECT_NEAR(math::atan2(big, tiny), math::half_pi, 1e-6f);
+    EXPECT_NEAR(math::atan2(-big, tiny), -math::half_pi, 1e-6f);
+    EXPECT_NEAR(math::atan2(tiny, big), 0.0f, 1e-6f);
+    EXPECT_NEAR(math::atan2(tiny, -big), math::pi, 1e-6f);
 }
 
 // The sign of a zero is data: asin(-0) is -0 per the C library, and losing it

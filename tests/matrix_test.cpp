@@ -7,6 +7,7 @@
 // against DirectXMath rather than against Mathematics's own output.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/matrix.hpp>
 
@@ -742,3 +743,46 @@ TEST(matrix_dx_parity, point_and_direction_transforms_match_direct_x_math) {
     }
 }
 #endif // MATHEMATICS_TEST_HAS_DXMATH
+
+// ---------------------------------------------------- storage and accessors
+TEST(matrix3x3_storage, default_is_zero_and_accessors_name_rows_and_columns) {
+    EXPECT_EQ(math_test::runtime_value(matrix3x3{}),
+              matrix3x3(0, 0, 0, 0, 0, 0, 0, 0, 0));
+
+    matrix3x3 m = math_test::runtime_value(matrix3x3{1, 2, 3, 4, 5, 6, 7, 8, 9});
+    EXPECT_EQ(m.get_row(1), vector3(4, 5, 6));
+    EXPECT_EQ(m.get_column(2), vector3(3, 6, 9));
+    m(2, 0) = -7.0f;
+    EXPECT_EQ(m.m[2][0], -7.0f);
+}
+
+TEST(matrix3x3_operators, transpose_and_compound_multiply) {
+    const matrix3x3 a = math_test::runtime_value(matrix3x3{1, 2, 3, 4, 5, 6, 7, 8, 10});
+    const matrix3x3 b{2, 0, 0, 1, 1, 0, 0, 3, 1};
+
+    EXPECT_EQ(math::transpose(a), matrix3x3(1, 4, 7, 2, 5, 8, 3, 6, 10));
+    matrix3x3 product = a;
+    product *= b;
+    EXPECT_EQ(product, a * b);
+}
+
+// right/up/forward are the basis rows, which is the row-vector convention: a
+// rotation's rows are where the local axes land.
+TEST(matrix4x4_storage, basis_accessors_are_the_first_three_rows) {
+    matrix4x4 m = math_test::runtime_value(
+        matrix4x4{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16});
+    EXPECT_EQ(m.right(), vector3(1, 2, 3));
+    EXPECT_EQ(m.up(), vector3(5, 6, 7));
+    EXPECT_EQ(m.forward(), vector3(9, 10, 11));
+    m(3, 1) = -14.0f;
+    EXPECT_EQ(m.m[3][1], -14.0f);
+}
+
+TEST(matrix4x4_operators, compound_multiply_matches_the_binary_form) {
+    const matrix4x4 a = math_test::runtime_value(
+        matrix4x4{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17});
+    const matrix4x4 b = math::transpose(a);
+    matrix4x4 product = a;
+    product *= b;
+    EXPECT_EQ(product, a * b);
+}

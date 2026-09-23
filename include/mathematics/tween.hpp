@@ -328,22 +328,21 @@ public:
         if (next - next != 0.0f) {
             next = std::numeric_limits<float>::max();
         }
-        if (!infinite_ || playback_ == tween_playback::once) {
-            const float end = end_time();
-            if (next > end) next = end;
-        }
+        // An infinite timeline's end is float's maximum, so this clamp is a
+        // no-op there and needs no separate branch.
+        const float end = end_time();
+        if (next > end) next = end;
         elapsed_seconds_ = next;
 
         const timeline_position position = locate(elapsed_seconds_);
         if (position.completed) state_ = tween_state::completed;
 
+        // Time only moves forward here -- every setter that could shorten the
+        // timeline restarts it -- so the count cannot have gone down.
         const std::uint32_t after = completed_cycle_count(elapsed_seconds_);
-        const std::uint32_t crossed =
-            after >= before ? after - before
-                            : std::numeric_limits<std::uint32_t>::max();
         return tween_step<value_type>{
             interpolator_(from_, to_, easing_(position.progress)),
-            state_, crossed};
+            state_, after - before};
     }
 
     constexpr void pause() noexcept {
@@ -364,10 +363,8 @@ public:
     constexpr void seek(float elapsed_seconds) noexcept {
         const bool was_paused = state_ == tween_state::paused;
         elapsed_seconds_ = detail::canonical_time(elapsed_seconds);
-        if (!infinite_ || playback_ == tween_playback::once) {
-            const float end = end_time();
-            if (elapsed_seconds_ > end) elapsed_seconds_ = end;
-        }
+        const float end = end_time();
+        if (elapsed_seconds_ > end) elapsed_seconds_ = end;
         const timeline_position position = locate(elapsed_seconds_);
         state_ = position.completed
                      ? tween_state::completed

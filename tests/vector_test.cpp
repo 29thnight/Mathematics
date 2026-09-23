@@ -2,6 +2,7 @@
 // Geometry and DirectXMath parity live in vector_geometry_test.cpp.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/vector.hpp>
 
@@ -231,4 +232,52 @@ TEST(vector_lane_math, lerp_extrapolates_outside_the_unit_interval) {
     EXPECT_TRUE(math::near_equal(math::lerp(a, b, 2.0f), vector3(20, 20, 20)));
     EXPECT_TRUE(math::near_equal(math::lerp(a, b, -1.0f),
                                  vector3(-10, -10, -10)));
+}
+
+// ------------------------------------------------- indexing, constants, scale
+TEST(vector_storage, indexing_reads_and_writes_components_in_order) {
+    vector2 v2 = math_test::runtime_value(vector2{1.0f, 2.0f});
+    vector3 v3 = math_test::runtime_value(vector3{1.0f, 2.0f, 3.0f});
+    vector4 v4 = math_test::runtime_value(vector4{1.0f, 2.0f, 3.0f, 4.0f});
+    v2[1] = 20.0f;
+    v3[2] = 30.0f;
+    v4[3] = 40.0f;
+    EXPECT_EQ(v2, vector2(1.0f, 20.0f));
+    EXPECT_EQ(v3, vector3(1.0f, 2.0f, 30.0f));
+    EXPECT_EQ(v4, vector4(1.0f, 2.0f, 3.0f, 40.0f));
+
+    const vector2& c2 = v2;
+    const vector3& c3 = v3;
+    const vector4& c4 = v4;
+    EXPECT_EQ(c2[0], 1.0f);
+    EXPECT_EQ(c3[1], 2.0f);
+    EXPECT_EQ(c4[2], 3.0f);
+}
+
+TEST(vector_storage, named_constants_are_the_unit_axes) {
+    EXPECT_EQ(math_test::runtime_value(vector2::unit_x()), vector2(1, 0));
+    EXPECT_EQ(math_test::runtime_value(vector4::one()), vector4(1, 1, 1, 1));
+    EXPECT_EQ(math_test::runtime_value(vector4::unit_x()), vector4(1, 0, 0, 0));
+    EXPECT_EQ(math_test::runtime_value(vector4::unit_z()), vector4(0, 0, 1, 0));
+    EXPECT_EQ(math_test::runtime_value(vector4::unit_w()), vector4(0, 0, 0, 1));
+}
+
+TEST(vector_arithmetic, scalar_on_the_left_scales_like_on_the_right) {
+    const vector3 v = math_test::runtime_value(vector3{1.0f, -2.0f, 3.0f});
+    EXPECT_EQ(2.0f * v, v * 2.0f);
+    EXPECT_EQ(0.5f * vector2(4.0f, 6.0f), vector2(2.0f, 3.0f));
+    EXPECT_EQ(-1.0f * vector4(1.0f, 2.0f, 3.0f, 4.0f),
+              vector4(-1.0f, -2.0f, -3.0f, -4.0f));
+}
+
+// The unused lanes of a vector2 or vector3 divisor are set to one before the
+// divide, so they cannot raise a divide-by-zero or leave a NaN behind.
+TEST(vector_arithmetic, narrow_vectors_divide_componentwise) {
+    const vector3 a = math_test::runtime_value(vector3{2.0f, 9.0f, -8.0f});
+    const vector3 b = math_test::runtime_value(vector3{4.0f, 3.0f, 2.0f});
+    EXPECT_EQ(a / b, vector3(0.5f, 3.0f, -4.0f));
+
+    const vector2 c = math_test::runtime_value(vector2{1.0f, -6.0f});
+    const vector2 d = math_test::runtime_value(vector2{4.0f, 2.0f});
+    EXPECT_EQ(c / d, vector2(0.25f, -3.0f));
 }

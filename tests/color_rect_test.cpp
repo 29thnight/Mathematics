@@ -1,7 +1,11 @@
 #include <mathematics/color.hpp>
 #include <mathematics/rect.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
+
+#include <limits>
 
 #if __has_include(<DirectXMath.h>)
 #  include <DirectXMath.h>
@@ -146,3 +150,105 @@ TEST(color_dx_parity, adjustment_helpers_match_direct_x_math) {
 #endif
 
 } // namespace
+
+// ----------------------------------------------------- operators and queries
+// Each input passes through runtime_value so the compiled operator runs; with
+// every argument a literal, GCC evaluates the whole call at compile time.
+TEST(color_operations, arithmetic_operators_act_per_channel) {
+    const color x = math_test::runtime_value(color{0.2f, 0.4f, 0.6f, 0.8f});
+    const color y{0.1f, 0.2f, 0.3f, 0.4f};
+
+    EXPECT_TRUE(math::near_equal(x + y, color{0.3f, 0.6f, 0.9f, 1.2f}));
+    EXPECT_TRUE(math::near_equal(x - y, color{0.1f, 0.2f, 0.3f, 0.4f}));
+    EXPECT_TRUE(math::near_equal(x / y, color{2.0f, 2.0f, 2.0f, 2.0f}));
+    EXPECT_TRUE(math::near_equal(x * 0.5f, color{0.1f, 0.2f, 0.3f, 0.4f}));
+    EXPECT_TRUE(math::near_equal(0.5f * x, x * 0.5f));
+    EXPECT_TRUE(math::near_equal(x / 2.0f, x * 0.5f));
+    EXPECT_TRUE(math::near_equal(-x, color{-0.2f, -0.4f, -0.6f, -0.8f}));
+    // Alpha is a channel like the others here -- premultiply is the operation
+    // that treats it differently.
+    EXPECT_TRUE(math::near_equal(math::modulate(x, y), x * y));
+}
+
+TEST(color_operations, compound_assignment_matches_the_binary_forms) {
+    const color start = math_test::runtime_value(color{0.2f, 0.4f, 0.6f, 0.8f});
+    const color other{0.1f, 0.2f, 0.4f, 0.5f};
+
+    color value = start;
+    value += other;
+    EXPECT_EQ(value, start + other);
+    value = start;
+    value -= other;
+    EXPECT_EQ(value, start - other);
+    value = start;
+    value *= other;
+    EXPECT_EQ(value, start * other);
+    value = start;
+    value *= 3.0f;
+    EXPECT_EQ(value, start * 3.0f);
+    value = start;
+    value /= other;
+    EXPECT_EQ(value, start / other);
+    value = start;
+    value /= 4.0f;
+    EXPECT_EQ(value, start / 4.0f);
+}
+
+TEST(color_storage, indexing_names_rgba_in_order_and_writes_through) {
+    color value = math_test::runtime_value(color::green());
+    EXPECT_EQ(value, color(0.0f, 1.0f, 0.0f, 1.0f));
+    EXPECT_EQ(math_test::runtime_value(color::blue()),
+              color(0.0f, 0.0f, 1.0f, 1.0f));
+
+    value[0] = 0.25f;
+    value[3] = 0.5f;
+    EXPECT_EQ(value, color(0.25f, 1.0f, 0.0f, 0.5f));
+    const color& view = value;
+    EXPECT_EQ(view[1], 1.0f);
+    EXPECT_EQ(view[2], 0.0f);
+}
+
+TEST(rect_storage, default_is_an_empty_rect_at_the_origin) {
+    const rect value = math_test::runtime_value(rect{});
+    EXPECT_EQ(value, rect(0.0f, 0.0f, 0.0f, 0.0f));
+    EXPECT_TRUE(value.is_empty());
+    EXPECT_EQ(value.area(), 0.0f);
+}
+
+TEST(rect_queries, area_is_zero_for_every_kind_of_empty) {
+    EXPECT_EQ(math_test::runtime_value(rect{1.0f, 2.0f, 3.0f, 4.0f}).area(),
+              12.0f);
+    EXPECT_EQ(math_test::runtime_value(rect{1.0f, 2.0f, -3.0f, 4.0f}).area(),
+              0.0f)
+        << "negative width is empty, not negative area";
+    EXPECT_EQ(math_test::runtime_value(rect{1.0f, 2.0f, 3.0f, 0.0f}).area(),
+              0.0f);
+    EXPECT_EQ(math_test::runtime_value(
+                  rect{0.0f, 0.0f, std::numeric_limits<float>::quiet_NaN(),
+                       1.0f}).area(),
+              0.0f);
+}
+
+// Closed on every edge, unlike the half-open point test: a rect contains
+// itself, and one sharing an outer edge.
+TEST(rect_queries, containment_of_a_rect_is_closed_and_rejects_empties) {
+    const rect outer = math_test::runtime_value(rect{0.0f, 0.0f, 10.0f, 10.0f});
+    EXPECT_TRUE(math::contains(outer, outer));
+    EXPECT_TRUE(math::contains(outer, rect{5.0f, 5.0f, 5.0f, 5.0f}));
+    EXPECT_FALSE(math::contains(outer, rect{5.0f, 5.0f, 5.5f, 5.0f}));
+    EXPECT_FALSE(math::contains(outer, rect{-0.5f, 2.0f, 1.0f, 1.0f}));
+    EXPECT_FALSE(math::contains(outer, rect{2.0f, 2.0f, 0.0f, 1.0f}))
+        << "an empty rect is not contained, even when it lies inside";
+    EXPECT_FALSE(math::contains(rect{}, rect{}));
+}
+
+TEST(rect_queries, near_equal_bounds_every_field_by_epsilon) {
+    const rect x = math_test::runtime_value(rect{1.0f, 2.0f, 3.0f, 4.0f});
+    EXPECT_TRUE(math::near_equal(x, rect{1.000001f, 2.0f, 3.0f, 4.0f}));
+    EXPECT_FALSE(math::near_equal(x, rect{1.0f, 2.1f, 3.0f, 4.0f}));
+    EXPECT_FALSE(math::near_equal(x, rect{1.0f, 2.0f, 3.0f, 3.9f}));
+    EXPECT_TRUE(math::near_equal(x, rect{1.0f, 2.0f, 3.05f, 4.0f}, 0.1f));
+    EXPECT_FALSE(math::near_equal(
+        x, rect{1.0f, 2.0f, std::numeric_limits<float>::quiet_NaN(), 4.0f}))
+        << "NaN in any field fails the positive-form comparison";
+}

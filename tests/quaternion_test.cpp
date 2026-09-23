@@ -8,6 +8,7 @@
 // against DirectXMath.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/quaternion.hpp>
 
@@ -679,3 +680,23 @@ TEST(quaternion_dx_parity, matrix_and_slerp_match_direct_x_math) {
     }
 }
 #endif // MATHEMATICS_TEST_HAS_DXMATH
+
+// ------------------------------------------------------ storage and operators
+TEST(quaternion_storage, axis_and_indexing_name_xyzw_in_order) {
+    quaternion q = math_test::runtime_value(quaternion{1.0f, 2.0f, 3.0f, 4.0f});
+    EXPECT_EQ(q.axis(), vector3(1.0f, 2.0f, 3.0f));
+    q[1] = -2.0f;
+    q[3] = 0.5f;
+    EXPECT_EQ(q, quaternion(1.0f, -2.0f, 3.0f, 0.5f));
+}
+
+TEST(quaternion_operators, compound_multiply_and_left_scalar_match_binary_forms) {
+    const quaternion a = math_test::runtime_value(
+        math::quaternion_from_axis_angle(vector3{0, 0, 1}, 0.5f));
+    const quaternion b = math::quaternion_from_axis_angle(vector3{1, 0, 0}, 0.25f);
+
+    quaternion product = a;
+    product *= b;
+    EXPECT_EQ(product, a * b);
+    EXPECT_EQ(2.0f * a, a * 2.0f);
+}

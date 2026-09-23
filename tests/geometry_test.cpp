@@ -8,6 +8,7 @@
 // the result is compared against it too.
 
 #include "support/reg_testing.hpp"
+#include "support/runtime_value.hpp"
 
 #include <mathematics/geometry.hpp>
 
@@ -864,3 +865,49 @@ TEST(geometry_dx_parity, sphere_raycast_matches_direct_x_collision) {
     EXPECT_GT(compared, 20) << "the skip must not have emptied the sweep";
 }
 #endif // MATHEMATICS_TEST_HAS_DXCOLLISION
+
+// ---------------------------------------------------------- ray at run time
+TEST(ray_storage, default_points_down_positive_z_and_compares_by_value) {
+    const ray r = math_test::runtime_value(ray{});
+    EXPECT_EQ(r.origin, vector3(0.0f, 0.0f, 0.0f));
+    EXPECT_EQ(r.direction, vector3(0.0f, 0.0f, 1.0f));
+    EXPECT_TRUE(r == ray(vector3{0, 0, 0}, vector3{0, 0, 1}));
+    EXPECT_FALSE(r == ray(vector3{0, 0, 0}, vector3{0, 0, -1}));
+    EXPECT_TRUE(math::near_equal(r, ray(vector3{0, 1e-6f, 0}, vector3{0, 0, 1})));
+    EXPECT_FALSE(math::near_equal(r, ray(vector3{0, 0, 0}, vector3{0, 0.1f, 1})));
+}
+
+// A negative direction component makes a slab's near face the one with the
+// larger coordinate; the slab test has to swap its entry and exit.
+TEST(raycast, box_from_the_positive_side_of_every_axis) {
+    const aabb box{vector3{0.0f, 0.0f, 0.0f}, vector3{1.0f, 1.0f, 1.0f}};
+    for (int axis = 0; axis < 3; ++axis) {
+        vector3 origin{0.0f, 0.0f, 0.0f};
+        vector3 direction{0.0f, 0.0f, 0.0f};
+        origin[axis] = 5.0f;
+        direction[axis] = -1.0f;
+        const auto hit =
+            math::raycast(math_test::runtime_value(ray{origin, direction}), box);
+        ASSERT_TRUE(hit.has_value()) << axis;
+        EXPECT_FLOAT_EQ(*hit, 4.0f) << axis;
+    }
+}
+
+// plane::reg and from_reg are interop: nothing in the library calls them, so a
+// lane-order mistake would reach only users.
+TEST(plane_storage, register_round_trip_keeps_abcd_in_lane_order) {
+    const plane p = math_test::runtime_value(plane{1.0f, 2.0f, 3.0f, 4.0f});
+    const auto r = p.reg();
+    EXPECT_EQ(math::get_x(r), 1.0f);
+    EXPECT_EQ(math::get_w(r), 4.0f);
+    EXPECT_EQ(plane::from_reg(r), p);
+}
+
+TEST(sphere_storage, default_is_a_point_at_the_origin_and_compares_by_value) {
+    const sphere s = math_test::runtime_value(sphere{});
+    EXPECT_EQ(s.center, vector3(0.0f, 0.0f, 0.0f));
+    EXPECT_EQ(s.radius, 0.0f);
+    EXPECT_TRUE(s == sphere(vector3{0, 0, 0}, 0.0f));
+    EXPECT_FALSE(s == sphere(vector3{0, 0, 0}, 1.0f));
+    EXPECT_FALSE(s == sphere(vector3{0, 1, 0}, 0.0f));
+}

@@ -1,9 +1,12 @@
 #include <mathematics/geometry.hpp>
 #include <mathematics/transform.hpp>
 
+#include "support/runtime_value.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 
 #if __has_include(<DirectXCollision.h>)
 #  include <DirectXCollision.h>
@@ -344,5 +347,195 @@ TEST(frustum_dx_parity, frustum_intersection_and_raycast_match) {
     if (mine_hit) EXPECT_NEAR(mine_distance, their_distance, 1e-4f);
 }
 #endif
+
+} // namespace
+
+// ------------------------------------------------ run-time paths and reverses
+// Inputs go through runtime_value: every query here is constexpr, and with
+// literal arguments GCC answers it at compile time without running the code.
+namespace {
+
+using math_test::runtime_value;
+
+// The default frustum: apex at the origin (near distance zero), looking +Z,
+// slopes of one, far plane at one.
+bounding_frustum apex_frustum() { return runtime_value(bounding_frustum{}); }
+
+TEST(frustum_projection, rh_extraction_runs_at_run_time_too) {
+    const matrix4x4 projection =
+        runtime_value(math::perspective_fov_rh(math::half_pi, 2.0f, 1.0f, 10.0f));
+    const auto extracted = math::try_bounding_frustum_from_projection_rh(projection);
+    ASSERT_TRUE(extracted.has_value());
+    EXPECT_NEAR(extracted->near_plane, -10.0f, 1e-4f);
+    EXPECT_NEAR(extracted->far_plane, -1.0f, 1e-5f);
+    EXPECT_EQ(math::bounding_frustum_from_projection_rh(projection), *extracted);
+}
+
+TEST(frustum_projection, non_finite_and_overflowing_projections_are_rejected) {
+    matrix4x4 infinite = runtime_value(
+        math::perspective_fov_lh(math::half_pi, 1.0f, 1.0f, 10.0f));
+    infinite.m[0][0] = std::numeric_limits<float>::infinity();
+    EXPECT_FALSE(math::try_bounding_frustum_from_projection_lh(infinite));
+
+    // Every coefficient finite, but a slope (m23 - m20) / m00 that is not:
+    // the inputs pass the first screen and the derived frustum fails the second.
+    matrix4x4 overflowing = runtime_value(
+        math::perspective_fov_lh(math::half_pi, 1.0f, 1.0f, 10.0f));
+    overflowing.m[0][0] = 1e-30f;
+    overflowing.m[2][3] = 1e30f;
+    EXPECT_FALSE(math::try_bounding_frustum_from_projection_lh(overflowing));
+    EXPECT_EQ(math::bounding_frustum_from_projection_lh(overflowing),
+              bounding_frustum{});
+}
+
+TEST(frustum_transform, zero_scale_matrix_returns_the_default_frustum) {
+    matrix4x4 collapsed = runtime_value(matrix4x4::identity());
+    collapsed.m[1][1] = 0.0f;
+    EXPECT_EQ(math::transform(apex_frustum(), collapsed), bounding_frustum{});
+}
+
+TEST(frustum_queries, reversed_overloads_agree_with_the_frustum_first_forms) {
+    const bounding_frustum frustum = apex_frustum();
+    const sphere near_sphere{vector3{0.0f, 0.0f, 0.5f}, 0.1f};
+    const sphere far_sphere{vector3{0.0f, 0.0f, 5.0f}, 0.1f};
+    const aabb near_box{vector3{0.0f, 0.0f, 0.5f}, vector3{0.1f, 0.1f, 0.1f}};
+    const aabb far_box{vector3{0.0f, 0.0f, 5.0f}, vector3{0.1f, 0.1f, 0.1f}};
+
+    EXPECT_TRUE(math::intersects(near_sphere, frustum));
+    EXPECT_FALSE(math::intersects(far_sphere, frustum));
+    EXPECT_TRUE(math::intersects(near_box, frustum));
+    EXPECT_FALSE(math::intersects(far_box, frustum));
+}
+
+// The volumes contain the frustum only when all eight corners are inside.
+TEST(frustum_queries, sphere_and_box_containing_a_frustum) {
+    const bounding_frustum frustum = apex_frustum();
+
+    EXPECT_EQ(math::contains(sphere{vector3{0.0f, 0.0f, 0.5f}, 2.0f}, frustum),
+              containment::contains);
+    EXPECT_EQ(math::contains(sphere{vector3{0.0f, 0.0f, 0.5f}, 0.2f}, frustum),
+              containment::intersects);
+    EXPECT_EQ(math::contains(sphere{vector3{0.0f, 0.0f, 9.0f}, 0.2f}, frustum),
+              containment::disjoint);
+
+    EXPECT_EQ(math::contains(aabb{vector3{0.0f, 0.0f, 0.5f},
+                                  vector3{1.5f, 1.5f, 1.5f}}, frustum),
+              containment::contains);
+    EXPECT_EQ(math::contains(aabb{vector3{0.0f, 0.0f, 0.5f},
+                                  vector3{0.2f, 0.2f, 0.2f}}, frustum),
+              containment::intersects);
+    EXPECT_EQ(math::contains(aabb{vector3{0.0f, 0.0f, 9.0f},
+                                  vector3{0.2f, 0.2f, 0.2f}}, frustum),
+              containment::disjoint);
+}
+
+// With a near distance of zero the four near corners are one point, and every
+// face touching the apex is a degenerate triangle. The distance to those falls
+// back to the closest of the triangle's edges.
+TEST(frustum_queries, sphere_at_the_apex_measures_to_degenerate_faces) {
+    const bounding_frustum frustum = apex_frustum();
+    EXPECT_TRUE(math::intersects(frustum, sphere{vector3{0.0f, 0.0f, -0.5f}, 0.6f}));
+    EXPECT_FALSE(math::intersects(frustum, sphere{vector3{0.0f, 0.0f, -0.5f}, 0.4f}));
+}
+
+TEST(frustum_queries, box_and_frustum_separated_behind_the_apex_and_aside) {
+    EXPECT_FALSE(math::intersects(
+        apex_frustum(), aabb{vector3{0.0f, 0.0f, -2.0f}, vector3{0.5f, 0.5f, 0.5f}}));
+    EXPECT_FALSE(math::intersects(
+        apex_frustum(), aabb{vector3{3.0f, 0.0f, 0.5f}, vector3{0.5f, 0.5f, 0.5f}}));
+}
+
+TEST(frustum_queries, frustum_pairs_separate_in_either_argument_order) {
+    const bounding_frustum x = apex_frustum();
+    bounding_frustum beyond = apex_frustum();
+    beyond.origin = vector3{0.0f, 0.0f, 5.0f};
+    EXPECT_FALSE(math::intersects(x, beyond));
+    EXPECT_FALSE(math::intersects(beyond, x));
+
+    bounding_frustum overlapping = apex_frustum();
+    overlapping.origin = vector3{0.0f, 0.0f, 0.5f};
+    EXPECT_TRUE(math::intersects(x, overlapping));
+}
+
+TEST(frustum_queries, raycast_optional_and_the_parallel_miss) {
+    const bounding_frustum frustum = apex_frustum();
+    const auto hit = math::raycast(
+        runtime_value(ray{vector3{0.0f, 0.0f, -1.0f}, vector3{0.0f, 0.0f, 1.0f}}),
+        frustum);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_NEAR(*hit, 1.0f, 1e-5f);
+
+    // Parallel to the near plane and on its outside: no entry is possible.
+    EXPECT_FALSE(math::raycast(
+        runtime_value(ray{vector3{0.0f, 0.0f, -1.0f}, vector3{1.0f, 0.0f, 0.0f}}),
+        frustum));
+}
+
+TEST(volume_queries, contains_point_is_contains_or_disjoint) {
+    const sphere ball = runtime_value(sphere{vector3{1.0f, 0.0f, 0.0f}, 1.0f});
+    EXPECT_EQ(math::contains(ball, vector3{1.5f, 0.0f, 0.0f}), containment::contains);
+    EXPECT_EQ(math::contains(ball, vector3{3.0f, 0.0f, 0.0f}), containment::disjoint);
+
+    const aabb box = runtime_value(
+        aabb{vector3{0.0f, 0.0f, 0.0f}, vector3{1.0f, 2.0f, 3.0f}});
+    EXPECT_EQ(math::contains(box, vector3{0.5f, -1.5f, 2.5f}), containment::contains);
+    EXPECT_EQ(math::contains(box, vector3{0.5f, -2.5f, 2.5f}), containment::disjoint);
+}
+
+// Each separating-axis stage gets a pair that only it can separate; the
+// stages before it all overlap. The inputs were found by searching a grid
+// with the library's own per-stage tests, and are kept as plain data here.
+TEST(frustum_queries, each_sat_stage_separates_something_on_its_own) {
+    // Box axis only: the frustum's face normals all overlap this box.
+    EXPECT_FALSE(math::intersects(
+        apex_frustum(),
+        aabb{vector3{-1.5f, -0.75f, 1.0f}, vector3{0.25f, 0.5f, 0.5f}}));
+
+    // Edge cross product only. An axis-aligned frustum's edge-by-box-axis
+    // products coincide with its own face normals, so this needs a turn.
+    bounding_frustum turned = apex_frustum();
+    turned.orientation =
+        math::quaternion_from_axis_angle(vector3{1.0f, 1.0f, 0.0f}, 0.75f);
+    EXPECT_FALSE(math::intersects(
+        turned, aabb{vector3{-0.5f, 0.75f, 1.0f}, vector3{0.25f, 0.5f, 0.75f}}));
+
+    // The second frustum's planes only.
+    bounding_frustum second = apex_frustum();
+    second.origin = vector3{1.0f, -1.5f, 1.5f};
+    second.orientation =
+        math::quaternion_from_axis_angle(vector3{0.0f, 1.0f, 0.0f}, 2.25f);
+    EXPECT_FALSE(math::intersects(apex_frustum(), second));
+
+    // Edge-by-edge only.
+    bounding_frustum crossing = apex_frustum();
+    crossing.origin = vector3{-1.0f, 0.0f, 0.25f};
+    crossing.orientation =
+        math::quaternion_from_axis_angle(vector3{1.0f, 0.0f, 0.0f}, 2.25f);
+    EXPECT_FALSE(math::intersects(apex_frustum(), crossing));
+}
+
+// A frustum with equal left and right slopes is flat: its side faces are
+// segments, not triangles. The exact sphere distance then falls back to the
+// nearest point on the triangles' edges.
+TEST(frustum_queries, sphere_beside_a_flat_frustum_measures_to_edges) {
+    const bounding_frustum flat = runtime_value(bounding_frustum{
+        vector3::zero(), quaternion::identity(),
+        0.0f, 0.0f, 1.0f, -1.0f, 1.0f, 2.0f});
+    EXPECT_TRUE(math::intersects(flat, sphere{vector3{0.1f, 0.0f, 1.5f}, 0.2f}));
+    // Beyond the far edge: 0.18 away in one case, 0.21 in the other.
+    EXPECT_TRUE(math::intersects(flat, sphere{vector3{0.1f, 0.0f, 2.15f}, 0.2f}));
+    EXPECT_FALSE(math::intersects(flat, sphere{vector3{0.15f, 0.0f, 2.15f}, 0.2f}));
+}
+
+TEST(frustum_queries, zero_direction_ray_never_hits) {
+    EXPECT_FALSE(math::raycast(
+        runtime_value(ray{vector3{0.0f, 0.0f, 0.5f}, vector3{0.0f, 0.0f, 0.0f}}),
+        apex_frustum()));
+}
+
+TEST(frustum_projection, singular_rh_projection_fails_at_run_time) {
+    EXPECT_FALSE(math::try_bounding_frustum_from_projection_rh(
+        runtime_value(matrix4x4{})));
+}
 
 } // namespace

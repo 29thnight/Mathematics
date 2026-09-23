@@ -330,3 +330,45 @@ TEST(backend_shuffle_dx_parity, lane_getters_match_direct_x_math) {
     }
 }
 #endif // MATHEMATICS_TEST_HAS_DXMATH
+
+// ------------------------------------------------ narrow and broadcast access
+TEST(backend_shuffle, load_splat_broadcasts_one_float) {
+    const float value = opaque(-2.5f);
+    const vec_reg r = math::load_splat(&value);
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(math::lane(r, i), -2.5f) << i;
+}
+
+TEST(backend_shuffle, set_lane_replaces_one_lane_only) {
+    vec_reg r = math::set(opaque(1.0f), 2.0f, 3.0f, 4.0f);
+    math::set_lane(r, 2, -3.0f);
+    EXPECT_EQ(to_array(r), (std::array<float, 4>{1.0f, 2.0f, -3.0f, 4.0f}));
+}
+
+#if MATHEMATICS_SIMD_SSE
+// load3 and store3 are what vector3 uses to move three floats through a
+// register -- clang's loads, MSVC's stores. Neither runs on GCC through vector3
+// at all, and they are the only backend functions that move fewer bytes than a
+// register holds, so a stray fourth lane would corrupt whatever follows the
+// object. Offset by one float so the access is unaligned, with sentinels on
+// both sides.
+TEST(backend_shuffle, three_lane_load_and_store_touch_exactly_twelve_bytes) {
+    random_vectors gen(random_seed + 45);
+    for (int n = 0; n < sample_count; ++n) {
+        const sample a = gen.next();
+        std::array<float, 5> buffer{-7.0f, 0.0f, 0.0f, 0.0f, -8.0f};
+
+        math::store3(buffer.data() + 1, a.v);
+        EXPECT_EQ(buffer[0], -7.0f) << n;
+        EXPECT_EQ(buffer[1], a.f[0]) << n;
+        EXPECT_EQ(buffer[2], a.f[1]) << n;
+        EXPECT_EQ(buffer[3], a.f[2]) << n;
+        EXPECT_EQ(buffer[4], -8.0f) << "store3 wrote a fourth lane, sample " << n;
+
+        const auto loaded = to_array(math::load3(buffer.data() + 1));
+        EXPECT_EQ(loaded[0], a.f[0]) << n;
+        EXPECT_EQ(loaded[1], a.f[1]) << n;
+        EXPECT_EQ(loaded[2], a.f[2]) << n;
+        EXPECT_EQ(loaded[3], 0.0f) << "load3 read past twelve bytes, sample " << n;
+    }
+}
+#endif
