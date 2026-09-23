@@ -228,13 +228,15 @@ foreach ($comparison in $comparisons) {
     # Wall-clock time, not CPU time. On Windows a thread's CPU time advances in
     # 15.6 ms scheduler ticks, and with random interleaving each repetition runs
     # for a few tens of milliseconds, so cpu_time is quantized to a large
-    # fraction of what it measures. Over 512 benchmark-samples from sixteen
-    # sampler jobs its CV had a p90 of 16.9% and a maximum of 107% -- one
+    # fraction of what it measures. Over 1,024 benchmark-samples from 32
+    # sampler jobs its CV had a p99 of 34% and a maximum of 107% -- one
     # repetition recorded no CPU time at all and made items_per_second
-    # infinite. real_time over the same repetitions: p90 2.9%, maximum 10.2%.
-    # The values that kept recurring exactly across CI runs (559.241 M/s and
-    # the like) were those quantization steps. These benchmarks are single
-    # threaded and never sleep, so wall-clock time is the quantity anyway.
+    # infinite -- and 82 exceeded the 10% limit below. real_time over the same
+    # repetitions: p99 6.4%, three over the limit. docs/BASELINE.md section 11
+    # has the table. The values that kept recurring exactly across CI runs
+    # (559.241 M/s and the like) were those quantization steps. These
+    # benchmarks are single threaded and never sleep, so wall-clock time is
+    # the quantity anyway.
     #
     # items_per_second is N / cpu_time for every repetition, a monotone map, so
     # with an odd repetition count N = median(ips) * median(cpu_time) exactly,
