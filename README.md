@@ -6,8 +6,8 @@
 DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 게임 수학 라이브러리다.
 헤더 온리이며 x64의 SSE2/AVX2, ARM64의 NEON, 이식성 검증을 위한 스칼라 폴백을 지원한다.
 
-> **1.0.0:** 릴리스 기준인 "성능 표 전 항목 DirectXMath 대비 ±5%"를 기준 기계에서
-> MSVC와 clang-cl 모두 통과했다. 판정은 [PLAN](docs/PLAN.md), 측정치는
+> **1.0.1:** 릴리스 기준인 "성능 표 전 항목 DirectXMath 대비 ±5%"를 기준 기계에서
+> MSVC 19.44(Visual Studio 2022)·19.51과 clang-cl 모두 통과했다. 판정은 [PLAN](docs/PLAN.md), 측정치는
 > [BASELINE](docs/BASELINE.md), 변경 내역은 [CHANGELOG](CHANGELOG.md)에 있다.
 > 1.0.0부터 공개 API의 호환성은 주 버전이 보증한다.
 
@@ -55,7 +55,7 @@ target_link_libraries(my_game PRIVATE Mathematics::Mathematics)
 include(FetchContent)
 FetchContent_Declare(Mathematics
     GIT_REPOSITORY https://github.com/29thnight/Mathematics.git
-    GIT_TAG v1.0.0)
+    GIT_TAG v1.0.1)
 FetchContent_MakeAvailable(Mathematics)   # 또는 add_subdirectory(external/mathematics)
 
 target_link_libraries(my_game PRIVATE Mathematics::Mathematics)

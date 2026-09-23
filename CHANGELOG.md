@@ -4,7 +4,9 @@
 [Semantic Versioning](https://semver.org/lang/ko/)을 따른다. 1.0.0부터 공개 API의
 호환성은 주 버전이 보증한다.
 
-## [Unreleased]
+## [1.0.1] — 2026-09-23
+
+1.0.0의 결함 수정판이다. 공개 API는 바뀌지 않았다.
 
 ### 수정
 
@@ -94,5 +96,6 @@
 
 첫 배포본(pre-release). clang-cl `matrix4x4` 곱 처리량이 릴리스 기준을 넘긴 채였다.
 
+[1.0.1]: https://github.com/29thnight/Mathematics/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/29thnight/Mathematics/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/29thnight/Mathematics/releases/tag/v0.1.0
