@@ -10,20 +10,20 @@
 - **기능 구현:** Phase 0~5 완료. 공개 API, 기하, 포맷, 가이드까지 존재한다.
 - **공개 이름:** 라이브러리 `Mathematics`, include root `mathematics/`, namespace `math`.
   타입·함수·변수·열거형 값은 `lower_snake_case`를 사용하며 이전 이름의 호환층은 두지 않는다.
-- **정확성:** 로컬 5개 프리셋에서 260개 테스트 통과
-  (scalar의 아키텍처 감지 1개는 의도적 skip).
-- **릴리스 판정:** 미통과. `cross`/전치/쿼터니언 곱 회귀와 80% line coverage
-  자동화는 닫혔지만 clang-cl `matrix4x4` 곱 처리량과 전체 성능 표의 CI 자동화가
-  남아 있다. 기능 Phase의 완료와 릴리스 게이트 통과를 같은 말로 사용하지 않는다.
-  게이트가 열린 채로 [v0.1.0](https://github.com/29thnight/Mathematics/releases/tag/v0.1.0)을
-  pre-release로 배포했다 (2026-08-25). 배포본이 있다는 것과 게이트를 통과했다는
-  것도 같은 말이 아니며, 릴리스 노트에 열린 항목을 그대로 적었다.
-- **자동 게이트:** MSVC·clang-cl에서 수정된 5개 latency/throughput 비교를 DXMath 대비
-  5%로 강제한다. GCC/gcovr에서는 x86 활성 `include/mathematics` line coverage 80%를
-  강제한다. scalar/SSE2/NEON은 별도 correctness matrix가 담당하며 coverage 합산
-  대상은 아니다.
-- **열린 성능 항목:** clang-cl `matrix4x4` 곱 처리량. 최신 수치는
-  [BASELINE.md](BASELINE.md)에 있다.
+- **정확성:** 로컬 5개 구성(MSVC AVX2·SSE2·scalar·C++20, clang-cl)에서 340개 테스트 통과.
+- **릴리스 판정:** 통과 (2026-09-23). §4.2의 ±5%를 기준 기계(i7-8700K)에서 MSVC 19.51과
+  clang-cl 22.1.3으로 판정해 16행 전부가 두 컴파일러에서 5% 안이다
+  ([BASELINE §12](BASELINE.md)). 게이트가 열린 채로
+  [v0.1.0](https://github.com/29thnight/Mathematics/releases/tag/v0.1.0)을 pre-release로
+  배포했었고(2026-08-25), 1.0.0이 기준을 통과한 첫 판이다.
+- **자동 게이트:** MSVC·clang-cl에서 5개 latency/throughput 비교를 벽시계 기준으로 DXMath와
+  대조한다. 러너 CPU가 여러 종이라 CI 게이트는 회귀 탐지선이고, 허용치는
+  [OPEN-ISSUES §1](OPEN-ISSUES.md)에 적었다. 같은 잡이 16행 전체를 기록한다.
+  GCC/gcovr에서는 x86 활성 `include/mathematics` line coverage 80%를 강제한다.
+  scalar/SSE2/NEON은 별도 correctness matrix가 담당하며 coverage 합산 대상은 아니다.
+  설치된 패키지를 `find_package`로 소비하는 package 잡이 Linux·Windows에서 돈다.
+- **열린 항목:** 기준 기계에는 없다. CI 러너 CPU별 격차와 그 밖의 미해결 사항은
+  [OPEN-ISSUES.md](OPEN-ISSUES.md)에 있다.
 
 ---
 
@@ -223,6 +223,12 @@ DXMath 대응 함수와 1:1 벤치마크로 직접 비교한다. 이 비교는 �
 **합격선**: 위 표의 전 항목에서 DXMath 대비 ±5% 이내. 미달 항목이 하나라도
 있으면 해당 Phase 완료 불가, 릴리스 블록.
 
+**판정 환경** (2026-09-23 결정): 합격선은 기준 기계(i7-8700K)에서 MSVC와 clang-cl
+두 툴체인으로 판정한다. 호스티드 러너 풀에는 CPU가 최소 다섯 종 있고 같은 행이 CPU에
+따라 수십 포인트 다르다([BASELINE §11](BASELINE.md)). 그래서 CI 게이트는 회귀 탐지선과
+CPU별 기록을 맡고, 릴리스를 막지 않는다. 판정 절차는
+`scripts\check_performance.ps1 -Table Full -ReportOnly`를 두 빌드에 돌리는 것이다.
+
 지연과 처리량 둘 다 게이트에 포함한다. Phase 0에서는 처리량 측정의 변동이
 ±15%라 제외했으나 Phase 1에서 두 결함(벡터 구성 비용을 재던 문제, 배치가 L2를
 넘겨 대역폭에 묶이던 문제)을 고치자 변동이 1% 수준으로 떨어졌다
@@ -356,7 +362,7 @@ SimpleMath의 `vector3`에 가까운 이름이 사용자에게 익숙하다.
 
 핫 루프에서 함수 경계를 넘나드는 코드는 여전히 `vec_reg`를 직접 쓴다.
 
-### Phase 3 — 행렬 — **기능 완료 (2026-08-24), clang 곱 처리량 미통과**
+### Phase 3 — 행렬 — **완료 (2026-08-24; clang-cl 곱은 2026-09-23 BASELINE §12)**
 - [x] `matrix4x4`, `matrix3x3` — row-major, row-vector (DXMath 관례)
 - [x] 곱셈·전치·행렬식·역행렬·`v * M`·`transform_point`/`transform_direction`
 - [x] 테스트 41개 추가 (총 126개). 관례 자체를 DXMath와 대조한다.
@@ -500,7 +506,7 @@ SimpleMath의 `vector3`에 가까운 이름이 사용자에게 익숙하다.
    `lane_count`를 두지 않아 `vector_like`에서 제외했다. 넣었다면 벡터의 성분별 `operator*`가
    해밀턴 곱과 경쟁했을 것이다. 컴파일되고 거의 맞게 렌더되는 종류의 버그다.
 
-### Phase 5 — 기하 & 마감 — **기능 및 감사 완료 (2026-08-24), 전체 릴리스 게이트 미통과**
+### Phase 5 — 기하 & 마감 — **완료 (2026-08-24; 릴리스 판정 2026-09-23)**
 - [x] 기하: `plane.hpp` / `ray.hpp` / `bounds.hpp` / `intersect.hpp`,
       우산 `geometry.hpp`. 관례는 DirectXMath·DirectXCollision에서 관측해 확정
 - [x] `format.hpp` — `std::format` 지원. 우산 헤더에서 제외했다: `<format>`은
@@ -537,7 +543,8 @@ SimpleMath의 `vector3`에 가까운 이름이 사용자에게 익숙하다.
 
 각 Phase 말미에 코드 리뷰를 수행했다. 커버리지 80%는 이제 CI에서 측정·강제한다.
 독립적인 로컬 MSVC 계측도 1,462/1,466 line(99.73%)을 기록했다. 전체 릴리스 판정은
-남은 clang-cl 행렬 곱 처리량과 아직 자동화하지 않은 성능 표 항목 때문에 미통과다.
+2026-09-23에 기준 기계에서 통과했다 — 남아 있던 clang-cl 세 행(4x4 곱 처리량·지연,
+slerp)을 [BASELINE §12](BASELINE.md)에서 닫았다.
 
 ---
 
