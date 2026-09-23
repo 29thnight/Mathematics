@@ -21,7 +21,8 @@
 - **자동 게이트:** MSVC·clang-cl에서 5개 latency/throughput 비교를 벽시계 기준으로 DXMath와
   대조한다. 러너 CPU가 여러 종이라 CI 게이트는 회귀 탐지선이고, 허용치는
   [OPEN-ISSUES §1](OPEN-ISSUES.md)에 적었다. 같은 잡이 16행 전체를 기록한다.
-  GCC/gcovr에서는 x86 활성 `include/mathematics` line coverage 80%를 강제한다.
+  GCC/gcovr에서는 x86 활성 `include/mathematics` line coverage 95%를 강제한다
+  (2026-09-23에 80%에서 올렸다. 당시 98.3%).
   scalar/SSE2/NEON은 별도 correctness matrix가 담당하며 coverage 합산 대상은 아니다.
   설치된 패키지를 `find_package`로 소비하는 package 잡이 Linux·Windows에서 돈다.
 - **열린 항목:** 기준 기계에는 없다. CI 러너 CPU별 격차와 그 밖의 미해결 사항은
@@ -185,7 +186,12 @@ Mathematics/
 
 ## 4. 검증 전략
 
-### 4.1 정확성 (TDD, 커버리지 80%+)
+### 4.1 정확성 (TDD, 커버리지 95%+)
+
+처음 정한 기준은 80%였다. 2026-09-23에 스위트가 98.3%에 이르자 95%로 올렸다. 덮지 못한
+51줄은 상수 평가 전용이거나 구성에 따라 컴파일아웃되는 코드라서, 95%를 밑돈다면 테스트 없는
+API가 들어왔다는 뜻이다([OPEN-ISSUES §2](OPEN-ISSUES.md)).
+
 - 각 연산마다 **스칼라 참조 구현 대비 속성 테스트**: SIMD 경로 결과가
   참조 구현과 ULP 허용치 내 일치하는지 무작위 입력으로 검증.
 - **constexpr 패리티**: 동일 입력의 컴파일 타임 결과 == 런타임 결과 (`static_assert`).
@@ -543,7 +549,8 @@ SimpleMath의 `vector3`에 가까운 이름이 사용자에게 익숙하다.
    거리 0"이라는 틀린 결론을 냈다. 관례를 관측할 때 관측 장치부터 의심해야
    한다.
 
-각 Phase 말미에 코드 리뷰를 수행했다. 커버리지 80%는 이제 CI에서 측정·강제한다.
+각 Phase 말미에 코드 리뷰를 수행했다. 커버리지 80%는 이제 CI에서 측정·강제한다
+(2026-09-23에 95%로 올렸다, §4.1).
 독립적인 로컬 MSVC 계측도 1,462/1,466 line(99.73%)을 기록했다. 전체 릴리스 판정은
 2026-09-23에 기준 기계에서 통과했다 — 남아 있던 clang-cl 세 행(4x4 곱 처리량·지연,
 slerp)을 [BASELINE §12](BASELINE.md)에서 닫았다.

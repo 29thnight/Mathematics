@@ -320,7 +320,7 @@ scripts\open_vs.bat
 | Linux ARM64 | GCC와 Clang의 NEON 빌드·테스트 |
 | 정확성 | constexpr·스칼라 참조·DirectXMath 패리티 |
 | 성능 | MSVC/clang-cl에서 `cross`, 전치, 쿼터니언 곱을 DXMath와 비교하고 16행 전체를 기록 |
-| 커버리지 | GCC 활성 코드 line coverage 80% 이상 |
+| 커버리지 | GCC 활성 코드 line coverage 95% 이상 |
 | 패키지 | 설치한 패키지를 별도 프로젝트가 `find_package`로 소비 (Linux·Windows) |
 
 CI의 성능 게이트는 회귀 탐지선이다. 호스티드 러너의 CPU가 여러 종이어서 행마다

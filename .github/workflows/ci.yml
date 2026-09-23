@@ -148,8 +148,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # 95%, raised from 80% on 2026-09-23 when the suite reached 98.3%
+  # (2922 of 2973 lines). The 51 lines still uncovered are structural -- run
+  # only during constant evaluation, compiled out in this configuration, or a
+  # debug assert (docs/OPEN-ISSUES.md section 2) -- so the gap to 95% is about
+  # a hundred lines of slack for new code, not room for untested API.
   coverage:
-    name: Line coverage >= 80%
+    name: Line coverage >= 95%
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -183,7 +188,7 @@ jobs:
           gcovr
           --root .
           --filter 'include/mathematics/'
-          --fail-under-line 80
+          --fail-under-line 95
           --print-summary
           --xml-pretty
           --output "$RUNNER_TEMP/mathematics-coverage.xml"
