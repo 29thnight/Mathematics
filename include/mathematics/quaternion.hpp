@@ -302,10 +302,34 @@ slerp(const quaternion& a, const quaternion& b, float t) noexcept {
 
     if (d > 0.9995f) return nlerp(a, target, t);
 
+    // Two sine/cosine pairs, not three sines. The obvious form paid for three
+    // full evaluations -- range reduction and both polynomials each, cosine
+    // thrown away -- plus a second divide. The identity
+    // sin((1-t)θ) = sin θ cos tθ - cos θ sin tθ gets the first weight from
+    // values already in hand:
+    //
+    //   wb = sin tθ / sin θ
+    //   wa = cos tθ - cos θ * wb
+    //
+    // Both sines of θ come from the same evaluation they are divided by, so the
+    // endpoints stay exact: t = 1 gives wb = 1 and wa = 0 bit for bit, t = 0
+    // gives wb = 0 and wa = 1.
+    //
+    // And no range reduction. d is in [0, 0.9995] here, so θ = acos(d) is in
+    // (0, pi/2] by construction, and so is tθ for t in [0, 1] -- the kernel's
+    // own domain. Only extrapolation (t outside [0, 1], or NaN) takes the
+    // reducing path. On clang-cl, slerp was 12.6% behind DirectXMath before
+    // this; the reduction's branches and its NaN return, which pushed each pair
+    // through a general-purpose register, were most of it -- docs/BASELINE.md
+    // section 12.
     const float theta = acos(d);
-    const float sin_theta = sin(theta);
-    const float wa = sin((1.0f - t) * theta) / sin_theta;
-    const float wb = sin(t * theta) / sin_theta;
+    const detail::sin_cos_pair at_theta = detail::sin_cos_kernel(theta);
+    const float t_theta = t * theta;
+    const detail::sin_cos_pair at_t_theta =
+        t >= 0.0f && t <= 1.0f ? detail::sin_cos_kernel(t_theta)
+                               : detail::sin_cos_impl(t_theta);
+    const float wb = at_t_theta.sin / at_theta.sin;
+    const float wa = at_t_theta.cos - at_theta.cos * wb;
     return a * wa + target * wb;
 }
 

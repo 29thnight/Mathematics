@@ -156,6 +156,26 @@ struct sin_cos_pair {
     float cos;
 };
 
+// The polynomials alone, for an argument already in [-pi/2, pi/2]. Callers that
+// know their angle is in range by construction -- slerp's acos of a
+// non-negative dot is one -- use this directly and skip the reduction, its
+// branches and its NaN return, which on clang-cl also forced the pair through a
+// general-purpose register on every call.
+MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr sin_cos_pair
+sin_cos_kernel(float y) noexcept {
+    const float y2 = y * y;
+
+    const float s = (((((-2.3889859e-08f * y2 + 2.7525562e-06f) * y2
+                        - 0.00019840874f) * y2 + 0.0083333310f) * y2
+                      - 0.16666667f) * y2 + 1.0f) * y;
+
+    const float c = ((((-2.6051615e-07f * y2 + 2.4760495e-05f) * y2
+                       - 0.0013888378f) * y2 + 0.041666638f) * y2
+                     - 0.5f) * y2 + 1.0f;
+
+    return sin_cos_pair{s, c};
+}
+
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE constexpr sin_cos_pair
 sin_cos_impl(float radians) noexcept {
     if (!reducible(radians)) return sin_cos_pair{consteval_ops::quiet_nan,
@@ -199,17 +219,8 @@ sin_cos_impl(float radians) noexcept {
         sign = -1.0f;
     }
 
-    const float y2 = y * y;
-
-    const float s = (((((-2.3889859e-08f * y2 + 2.7525562e-06f) * y2
-                        - 0.00019840874f) * y2 + 0.0083333310f) * y2
-                      - 0.16666667f) * y2 + 1.0f) * y;
-
-    const float c = ((((-2.6051615e-07f * y2 + 2.4760495e-05f) * y2
-                       - 0.0013888378f) * y2 + 0.041666638f) * y2
-                     - 0.5f) * y2 + 1.0f;
-
-    return sin_cos_pair{s, sign * c};
+    const sin_cos_pair k = sin_cos_kernel(y);
+    return sin_cos_pair{k.sin, sign * k.cos};
 }
 
 } // namespace detail

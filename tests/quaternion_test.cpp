@@ -327,6 +327,43 @@ TEST(quaternion_slerp, moves_at_constant_angular_speed) {
     }
 }
 
+// Outside [0, 1] slerp leaves the unreduced kernel for the full sine and cosine.
+// The arc has to carry on at the same speed either side of the endpoints.
+TEST(quaternion_slerp, extrapolates_along_the_same_arc) {
+    const quaternion a = quaternion::identity();
+    const quaternion b =
+        math::quaternion_from_axis_angle(vector3{0, 0, 1}, 1.0f);
+    for (float t : {-1.0f, -0.5f, 1.5f, 2.0f, 3.0f}) {
+        const quaternion expected =
+            math::quaternion_from_axis_angle(vector3{0, 0, 1}, t);
+        EXPECT_TRUE(math::same_rotation(math::slerp(a, b, t), expected, 1e-4f))
+            << "t = " << t;
+    }
+}
+
+// The weights are built so the endpoints come back exactly, not merely within
+// tolerance: at t = 1 both sines of theta are one evaluation, so wb is 1 and wa
+// is 0. Endpoints on the same hemisphere so no sign flip intervenes, and far
+// enough apart to stay off the nlerp branch.
+TEST(quaternion_slerp, returns_endpoints_exactly) {
+    random_vectors gen(random_seed + 209);
+    int checked = 0;
+    for (int n = 0; n < 64; ++n) {
+        const quaternion a = random_rotation(gen);
+        quaternion b = random_rotation(gen);
+        if (math::dot(a, b) < 0.0f) b = -b;
+        if (math::dot(a, b) > 0.999f) continue;
+        const quaternion at_0 = math::slerp(a, b, 0.0f);
+        const quaternion at_1 = math::slerp(a, b, 1.0f);
+        EXPECT_EQ(at_0.x, a.x) << n; EXPECT_EQ(at_0.y, a.y) << n;
+        EXPECT_EQ(at_0.z, a.z) << n; EXPECT_EQ(at_0.w, a.w) << n;
+        EXPECT_EQ(at_1.x, b.x) << n; EXPECT_EQ(at_1.y, b.y) << n;
+        EXPECT_EQ(at_1.z, b.z) << n; EXPECT_EQ(at_1.w, b.w) << n;
+        ++checked;
+    }
+    EXPECT_GT(checked, 48);
+}
+
 // q and -q are the same rotation, so interpolating toward the far
 // representation must not take the long way round.
 TEST(quaternion_slerp, takes_the_short_arc) {
