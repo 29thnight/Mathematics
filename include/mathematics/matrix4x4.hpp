@@ -168,11 +168,29 @@ combine_rows(const float* a_row, vec_reg b0, vec_reg b1, vec_reg b2,
 // as the fallback for targets without AVX.
 MATHEMATICS_NODISCARD MATHEMATICS_INLINE matrix4x4
 multiply_avx(const matrix4x4& a, const matrix4x4& b) noexcept {
-    // Rows 0-1 and 2-3 of each operand, packed into one register per pair.
-    __m256 t0 = _mm256_loadu_ps(&a.m[0][0]);
-    __m256 t1 = _mm256_loadu_ps(&a.m[2][0]);
-    const __m256 u0 = _mm256_loadu_ps(&b.m[0][0]);
-    const __m256 u1 = _mm256_loadu_ps(&b.m[2][0]);
+    // Rows 0-1 and 2-3 of each operand, packed into one register per pair --
+    // built the way XMMatrixMultiply builds them, from four 128-bit row loads
+    // paired by cast + insertf128, not as two 256-bit loads. The arithmetic is
+    // the same either way; what differs is what the compiler can see. From
+    // separate row loads, permute2f128(u, u, 0x00) is visibly "row 0 on both
+    // halves", and clang emits it as vbroadcastf128 straight from memory, a
+    // load-port operation. From one 256-bit load it emits vpermpd instead: a
+    // lane-crossing shuffle, four of them, on the port the eight vshufps below
+    // already saturate. 12 shuffle-port operations against DirectXMath's 8 was
+    // clang-cl's whole throughput gap -- 355 against 530 M/s, and 8/12 is the
+    // ratio. docs/BASELINE.md section 12.
+    const __m128 a0 = _mm_loadu_ps(a.m[0]);
+    const __m128 a1 = _mm_loadu_ps(a.m[1]);
+    const __m128 a2 = _mm_loadu_ps(a.m[2]);
+    const __m128 a3 = _mm_loadu_ps(a.m[3]);
+    const __m128 b0 = _mm_loadu_ps(b.m[0]);
+    const __m128 b1 = _mm_loadu_ps(b.m[1]);
+    const __m128 b2 = _mm_loadu_ps(b.m[2]);
+    const __m128 b3 = _mm_loadu_ps(b.m[3]);
+    __m256 t0 = _mm256_insertf128_ps(_mm256_castps128_ps256(a0), a1, 1);
+    __m256 t1 = _mm256_insertf128_ps(_mm256_castps128_ps256(a2), a3, 1);
+    const __m256 u0 = _mm256_insertf128_ps(_mm256_castps128_ps256(b0), b1, 1);
+    const __m256 u1 = _mm256_insertf128_ps(_mm256_castps128_ps256(b2), b3, 1);
 
     // permute2f128 with 0x00 broadcasts b's row 0 to both halves, 0x11 its row 1
     // -- so one wide operand serves both output rows at once.
@@ -200,8 +218,26 @@ multiply_avx(const matrix4x4& a, const matrix4x4& b) noexcept {
     const __m256 c6 = _mm256_fmadd_ps(s0, r1, c4);
     const __m256 c7 = _mm256_fmadd_ps(s1, r1, c5);
 
+    // Two independent chains per row pair, mul -> fma, joined by this add:
+    // three dependent operations. Under fast math clang may fold the add into
+    // one of the chains and rebuild a single four-deep chain, and which of a's
+    // shuffles that chain then starts from is its choice. For DirectXMath's copy
+    // of this code it happened to be the first shuffle issued; for this one, the
+    // fifth, and with all eight shuffles on one port that put about four cycles
+    // on every link of a chained multiply -- 12.5% behind on the latency
+    // benchmark with an instruction mix identical to DirectXMath's. The fence
+    // keeps the add from being folded, so the structure stays as written in
+    // every floating-point mode. A #pragma clang fp reassociate(off) here does
+    // nothing: the fadd lives inside _mm256_add_ps's own inline body, which the
+    // pragma's lexical scope does not reach. MSVC does not reassociate
+    // intrinsics, which is why its latency was never behind.
+#if defined(__clang__) && __has_builtin(__arithmetic_fence)
+    t0 = _mm256_add_ps(__arithmetic_fence(c2), __arithmetic_fence(c6));
+    t1 = _mm256_add_ps(__arithmetic_fence(c3), __arithmetic_fence(c7));
+#else
     t0 = _mm256_add_ps(c2, c6);
     t1 = _mm256_add_ps(c3, c7);
+#endif
 
     matrix4x4 result;
     _mm256_storeu_ps(&result.m[0][0], t0);
