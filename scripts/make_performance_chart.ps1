@@ -3,8 +3,8 @@
 Render docs/assets/performance-comparison.png from benchmark JSON.
 
 .DESCRIPTION
-Reads the aggregate medians out of one MSVC run and one clang-cl run, lays the
-comparison out as HTML, and captures it with headless Chrome or Edge.
+Reads wall-clock aggregate medians from one MSVC run and one clang-cl run,
+lays the comparison out as HTML, and captures it with headless Chrome or Edge.
 
 Every bar caption is computed from the same median that draws the bar, so a
 caption cannot drift away from its chart the way a hand-transcribed one does.
@@ -48,11 +48,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $colors = @{
-    Math      = '#6C5CE7'
-    Unchecked = '#1F6FEB'
-    Dx        = '#12A5A0'
-    Glm       = '#D97706'
-    Vm        = '#DB2E68'
+    Math = '#6C5CE7'
+    Dx   = '#12A5A0'
 }
 
 function Get-BenchmarkMedians {
@@ -61,17 +58,49 @@ function Get-BenchmarkMedians {
     $data = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $result = @{}
     foreach ($entry in $data.benchmarks) {
+        if ($entry.error_occurred) { throw "benchmark '$($entry.run_name)' failed: $($entry.error_message)" }
         if ($entry.run_type -ne 'aggregate') { continue }
         if (-not $result.ContainsKey($entry.run_name)) {
-            $result[$entry.run_name] = [pscustomobject]@{ Ns = 0.0; Ips = 0.0; Cv = 0.0 }
+            $result[$entry.run_name] = [pscustomobject]@{
+                Ns = 0.0; Ips = 0.0; Cv = 0.0; Medians = 0; Cvs = 0
+            }
         }
         $row = $result[$entry.run_name]
         switch ($entry.aggregate_name) {
             'median' {
-                $row.Ns = [double]$entry.cpu_time
-                if ($entry.items_per_second) { $row.Ips = [double]$entry.items_per_second }
+                $row.Medians++
+                $factor = switch ($entry.time_unit) {
+                    'ns' { 1.0 }; 'us' { 1.0e3 }; 'ms' { 1.0e6 }; 's' { 1.0e9 }
+                    default { throw "unsupported time unit '$($entry.time_unit)'" }
+                }
+                $row.Ns = [double]$entry.real_time * $factor
+                if (-not [double]::IsFinite($row.Ns) -or $row.Ns -le 0) {
+                    throw "invalid wall-clock median for '$($entry.run_name)'"
+                }
+                if ($null -ne $entry.items_per_second) {
+                    # For odd repetition counts, median(ips) * median(cpu_time)
+                    # recovers the batch size exactly. Divide by wall time,
+                    # as check_performance.ps1 does; Windows CPU time is quantized.
+                    if ($entry.repetitions % 2 -ne 1) {
+                        throw 'throughput medians require an odd repetition count'
+                    }
+                    $items = [double]$entry.items_per_second * [double]$entry.cpu_time * $factor * 1.0e-9
+                    $row.Ips = $items / ($row.Ns * 1.0e-9)
+                    if (-not [double]::IsFinite($row.Ips) -or $row.Ips -le 0) {
+                        throw "invalid wall-clock throughput for '$($entry.run_name)'"
+                    }
+                }
             }
-            'cv' { $row.Cv = [double]$entry.cpu_time * 100.0 }
+            'cv' { $row.Cv = [double]$entry.real_time * 100.0; $row.Cvs++ }
+        }
+    }
+    foreach ($entry in $result.GetEnumerator()) {
+        if ($entry.Value.Medians -ne 1 -or $entry.Value.Cvs -ne 1 -or
+            -not [double]::IsFinite($entry.Value.Cv)) {
+            throw "missing, duplicate or invalid aggregates for '$($entry.Key)'"
+        }
+        if ($entry.Value.Cv -gt 10.0) {
+            throw "unstable wall-clock sample for '$($entry.Key)': CV $($entry.Value.Cv)% exceeds 10%"
         }
     }
     return $result
@@ -84,10 +113,14 @@ function Get-Metric {
         throw "benchmark '$Name' is not in the JSON -- run the full suite, not a filtered subset."
     }
     switch ($As) {
-        'Ns' { return $Run[$Name].Ns }
-        'Mps' { return $Run[$Name].Ips / 1e6 }
-        'Gps' { return $Run[$Name].Ips / 1e9 }
+        'Ns' { $value = $Run[$Name].Ns }
+        'Mps' { $value = $Run[$Name].Ips / 1e6 }
+        'Gps' { $value = $Run[$Name].Ips / 1e9 }
     }
+    if (-not [double]::IsFinite($value) -or $value -le 0) {
+        throw "missing or invalid $As metric for '$Name'"
+    }
+    return $value
 }
 
 # Percent by which $a exceeds $b. Positive means "more", which is better for a
@@ -110,132 +143,52 @@ function New-Panel {
     }
 }
 
-function Get-BarValue {
-    param([object]$Panel, [string]$Label)
-    return ($Panel.Bars | Where-Object { $_.Label -eq $Label } | Select-Object -First 1).Value
+function Build-ComparisonPanels {
+    param([hashtable]$Run, [object[]]$Specs)
+
+    foreach ($spec in $Specs) {
+        $math = Get-Metric -Run $Run -Name "bm_mathematics_$($spec[1])" -As $spec[2]
+        $dx = Get-Metric -Run $Run -Name "bm_dx_math_$($spec[1])" -As $spec[2]
+        $panel = New-Panel $spec[0] $spec[3] $spec[4] @(
+            (New-Bar 'Mathematics' $math $colors.Math),
+            (New-Bar 'DirectXMath' $dx $colors.Dx)) $spec[5]
+        $metric = if ($spec[2] -eq 'Ns') { '지연' } else { '처리량' }
+        $panel.Note = 'Mathematics {0}은 DirectXMath 대비 {1:+0.0;-0.0;+0.0}%' -f $metric, (Get-Percent $math $dx)
+        $panel
+    }
 }
 
 function Build-Panels {
-    param([hashtable]$M)
+    param([hashtable]$Run)
 
-    $ns = { param($n) Get-Metric -Run $M -Name $n -As 'Ns' }
-    $mps = { param($n) Get-Metric -Run $M -Name $n -As 'Mps' }
-    $gps = { param($n) Get-Metric -Run $M -Name $n -As 'Gps' }
-
-    return @(
-        (New-Panel 'vector4 add latency' 'ns' '낮을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $ns 'bm_mathematics_add_latency') $colors.Math),
-            (New-Bar 'DirectXMath' (& $ns 'bm_dx_math_add_latency') $colors.Dx),
-            (New-Bar 'GLM' (& $ns 'bm_glm_add_latency') $colors.Glm),
-            (New-Bar 'Vectormath' (& $ns 'bm_vectormath_add_latency') $colors.Vm))),
-
-        (New-Panel 'vector4 multiply + add latency' 'ns' '낮을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $ns 'bm_mathematics_mul_add_latency') $colors.Math),
-            (New-Bar 'DirectXMath' (& $ns 'bm_dx_math_mul_add_latency') $colors.Dx),
-            (New-Bar 'GLM' (& $ns 'bm_glm_mul_add_latency') $colors.Glm),
-            (New-Bar 'Vectormath' (& $ns 'bm_vectormath_mul_add_latency') $colors.Vm))),
-
-        (New-Panel 'dot4 → scalar latency' 'ns' '낮을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $ns 'bm_mathematics_dot4_scalar_latency') $colors.Math),
-            (New-Bar 'DirectXMath' (& $ns 'bm_dx_math_dot4_scalar_latency') $colors.Dx),
-            (New-Bar 'GLM' (& $ns 'bm_glm_dot4_scalar_latency') $colors.Glm),
-            (New-Bar 'Vectormath' (& $ns 'bm_vectormath_dot4_scalar_latency') $colors.Vm))),
-
-        (New-Panel 'multiply + add throughput' 'Gitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $gps 'bm_mathematics_mul_add_throughput') $colors.Math),
-            (New-Bar 'DirectXMath' (& $gps 'bm_dx_math_mul_add_throughput') $colors.Dx),
-            (New-Bar 'GLM' (& $gps 'bm_glm_mul_add_throughput') $colors.Glm),
-            (New-Bar 'Vectormath' (& $gps 'bm_vectormath_mul_add_throughput') $colors.Vm)) '{0:F3}'),
-
-        (New-Panel 'vector3 chain latency' 'ns' '낮을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $ns 'bm_mathematics_vector3_chain_latency') $colors.Math),
-            (New-Bar 'DirectXMath' (& $ns 'bm_dx_math_xmvector_chain_latency') $colors.Dx),
-            (New-Bar 'GLM' (& $ns 'bm_glm_vector3_chain_latency') $colors.Glm),
-            (New-Bar 'DirectXMath packed' (& $ns 'bm_dx_math_xmfloat3_chain_latency') $colors.Dx))),
-
-        (New-Panel 'vector3 normalize throughput' 'Mitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $mps 'bm_mathematics_vector3_normalize_throughput') $colors.Math),
-            (New-Bar 'Math unchecked' (& $mps 'bm_mathematics_vector3_normalize_unchecked_throughput') $colors.Unchecked),
-            (New-Bar 'DirectXMath' (& $mps 'bm_dx_math_vector3_normalize_throughput') $colors.Dx),
-            (New-Bar 'GLM' (& $mps 'bm_glm_vector3_normalize_throughput') $colors.Glm)) '{0:F1}'),
-
-        (New-Panel 'matrix4x4 multiply throughput' 'Mitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $mps 'bm_mathematics_matrix4x4_multiply_throughput') $colors.Math),
-            (New-Bar 'DirectXMath' (& $mps 'bm_dx_math_matrix4x4_multiply_throughput') $colors.Dx),
-            (New-Bar 'GLM' (& $mps 'bm_glm_matrix4x4_multiply_throughput') $colors.Glm)) '{0:F1}'),
-
-        (New-Panel 'matrix4x4 inverse throughput' 'Mitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $mps 'bm_mathematics_matrix4x4_inverse') $colors.Math),
-            (New-Bar 'DirectXMath' (& $mps 'bm_dx_math_matrix4x4_inverse') $colors.Dx),
-            (New-Bar 'GLM' (& $mps 'bm_glm_matrix4x4_inverse') $colors.Glm)) '{0:F1}'),
-
-        (New-Panel 'matrix4x4 transpose throughput' 'Mitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $mps 'bm_mathematics_matrix4x4_transpose') $colors.Math),
-            (New-Bar 'DirectXMath' (& $mps 'bm_dx_math_matrix4x4_transpose') $colors.Dx)) '{0:F1}'),
-
-        (New-Panel 'quaternion multiply throughput' 'Mitems/s' '높을수록 좋음' @(
-            (New-Bar 'Mathematics' (& $mps 'bm_mathematics_quaternion_multiply_throughput') $colors.Math),
-            (New-Bar 'DirectXMath' (& $mps 'bm_dx_math_quaternion_multiply_throughput') $colors.Dx)) '{0:F1}')
+    $specs = @(
+        @('vector4 add latency', 'add_latency', 'Ns', 'ns', '낮을수록 좋음', '{0:F2}'),
+        @('vector4 multiply + add latency', 'mul_add_latency', 'Ns', 'ns', '낮을수록 좋음', '{0:F2}'),
+        @('dot4 latency', 'dot4_latency', 'Ns', 'ns', '낮을수록 좋음', '{0:F2}'),
+        @('multiply + add throughput', 'mul_add_throughput', 'Gps', 'Gitems/s', '높을수록 좋음', '{0:F3}'),
+        @('vector3 cross throughput', 'cross_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('vector3 normalize throughput', 'vector3_normalize_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 multiply throughput', 'matrix4x4_multiply_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 inverse throughput', 'matrix4x4_inverse', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 transpose throughput', 'matrix4x4_transpose', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('quaternion multiply throughput', 'quaternion_multiply_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 multiply latency', 'matrix4x4_multiply_latency', 'Ns', 'ns', '낮을수록 좋음', '{0:F2}'),
+        @('quaternion slerp throughput', 'quaternion_slerp', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}')
     )
+    Build-ComparisonPanels -Run $Run -Specs $specs
 }
 
-function Set-PanelNotes {
-    param([object[]]$Panels)
+function Build-ClangPanels {
+    param([hashtable]$Run)
 
-    $spread = {
-        param($p)
-        $values = $p.Bars | ForEach-Object { $_.Value }
-        Get-Percent ($values | Measure-Object -Maximum).Maximum ($values | Measure-Object -Minimum).Minimum
-    }
-
-    $Panels[0].Note = '최대 차이 {0:F1}% — 측정 변동 범위 안의 동률권' -f (& $spread $Panels[0])
-    $Panels[1].Note = '최대 차이 {0:F1}% — 측정 변동 범위 안의 동률권' -f (& $spread $Panels[1])
-
-    $math = Get-BarValue $Panels[2] 'Mathematics'
-    $glm = Get-BarValue $Panels[2] 'GLM'
-    $vm = Get-BarValue $Panels[2] 'Vectormath'
-    $Panels[2].Note = 'GLM이 Mathematics보다 {0:F1}% {1} — 스칼라 반환이 네이티브라 추출 단계가 없음; Vectormath는 {2:F1}% {3}' -f `
-        [Math]::Abs((Get-Percent $glm $math)), $(if ($glm -lt $math) { '빠름' } else { '느림' }),
-        [Math]::Abs((Get-Percent $vm $math)), $(if ($vm -gt $math) { '느림' } else { '빠름' })
-
-    $math = Get-BarValue $Panels[3] 'Mathematics'
-    $dx = Get-BarValue $Panels[3] 'DirectXMath'
-    $glm = Get-BarValue $Panels[3] 'GLM'
-    $Panels[3].Note = 'Mathematics는 DirectXMath 대비 {0:+0.0;-0.0;+0.0}%; GLM만 {1:F0}% 열세 — FMA 미형성' -f `
-        (Get-Percent $math $dx), [Math]::Abs((Get-Percent $glm $math))
-
-    $math = Get-BarValue $Panels[4] 'Mathematics'
-    $dx = Get-BarValue $Panels[4] 'DirectXMath'
-    $packed = Get-BarValue $Panels[4] 'DirectXMath packed'
-    $Panels[4].Note = '12바이트 패킹 타입이 레지스터 상주 XMVECTOR와 {0:+0.0;-0.0;+0.0}%; 매 단계 load/store하는 XMFLOAT3은 {1:F1}배 느림' -f `
-        (Get-Percent $math $dx), ($packed / $math)
-
-    $math = Get-BarValue $Panels[5] 'Mathematics'
-    $unchecked = Get-BarValue $Panels[5] 'Math unchecked'
-    $dx = Get-BarValue $Panels[5] 'DirectXMath'
-    $glm = Get-BarValue $Panels[5] 'GLM'
-    $Panels[5].Note = 'Mathematics가 DX보다 {0:+0;-0;+0}% — 퇴화 입력 보장 포함; unchecked는 GLM 대비 {1:+0;-0;+0}%' -f `
-        (Get-Percent $math $dx), (Get-Percent $unchecked $glm)
-
-    foreach ($index in 6, 7) {
-        $math = Get-BarValue $Panels[$index] 'Mathematics'
-        $dx = Get-BarValue $Panels[$index] 'DirectXMath'
-        $glm = Get-BarValue $Panels[$index] 'GLM'
-        $Panels[$index].Note = 'Mathematics가 DX보다 {0:+0.0;-0.0;+0.0}%, GLM보다 {1:+0.0;-0.0;+0.0}%' -f `
-            (Get-Percent $math $dx), (Get-Percent $math $glm)
-    }
-
-    $math = Get-BarValue $Panels[8] 'Mathematics'
-    $dx = Get-BarValue $Panels[8] 'DirectXMath'
-    $Panels[8].Note = 'Mathematics가 DX보다 {0:+0.0;-0.0;+0.0}% — 임시 없이 4 load + 8 shuffle + 4 store로 목적지에 직접 씁니다' -f (Get-Percent $math $dx)
-
-    $math = Get-BarValue $Panels[9] 'Mathematics'
-    $dx = Get-BarValue $Panels[9] 'DirectXMath'
-    $Panels[9].Note = 'Mathematics와 DirectXMath 차이 {0:+0.0;-0.0;+0.0}% — 공유 아레나로 배치 편향을 제거한 뒤의 값' -f (Get-Percent $math $dx)
-
-    return $Panels
+    $specs = @(
+        @('vector3 normalize throughput', 'vector3_normalize_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 multiply throughput', 'matrix4x4_multiply_throughput', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}'),
+        @('matrix4x4 multiply latency', 'matrix4x4_multiply_latency', 'Ns', 'ns', '낮을수록 좋음', '{0:F2}'),
+        @('quaternion slerp throughput', 'quaternion_slerp', 'Mps', 'Mitems/s', '높을수록 좋음', '{0:F1}')
+    )
+    Build-ComparisonPanels -Run $Run -Specs $specs
 }
-
 function Format-Tick {
     param([double]$Value, [string]$Format)
     if ($Value -ge 10) { return '{0:F0}' -f $Value }
@@ -264,7 +217,7 @@ function ConvertTo-PanelHtml {
 }
 
 function New-ChartHtml {
-    param([object[]]$Panels, [string]$Meta, [string]$Key, [string[]]$Footnotes, [int]$PageWidth)
+    param([object[]]$Panels, [object[]]$ClangPanels, [string]$Meta, [string]$Key, [string[]]$Footnotes, [int]$PageWidth)
 
     $css = @'
 * { box-sizing: border-box; }
@@ -301,11 +254,11 @@ h2 { font-size:17.5px; margin:28px 0 3px; font-weight:700; }
 '@
 
     $legendItems = @(
-        @('Mathematics', $colors.Math), @('Mathematics unchecked', $colors.Unchecked),
-        @('DirectXMath', $colors.Dx), @('GLM', $colors.Glm), @('Vectormath', $colors.Vm))
+        @('Mathematics', $colors.Math), @('DirectXMath', $colors.Dx))
     $legend = ($legendItems | ForEach-Object { '<span><i style="background:{0}"></i>{1}</span>' -f $_[1], $_[0] }) -join ''
     $first = ($Panels[0..3] | ForEach-Object { ConvertTo-PanelHtml $_ }) -join ''
-    $second = ($Panels[4..9] | ForEach-Object { ConvertTo-PanelHtml $_ }) -join ''
+    $second = ($Panels[4..11] | ForEach-Object { ConvertTo-PanelHtml $_ }) -join ''
+    $third = ($ClangPanels | ForEach-Object { ConvertTo-PanelHtml $_ }) -join ''
     $foot = ($Footnotes | ForEach-Object { '<div>{0}</div>' -f $_ }) -join ''
 
     return @"
@@ -317,12 +270,15 @@ $css</style></head>
 <h1>Mathematics 성능 비교</h1>
 <p class="sub">$Meta</p>
 <div class="legend">$legend</div>
-<h2>4개 라이브러리 공통 연산</h2>
+<h2>MSVC · 저수준 연산 비교</h2>
 <p class="lede">동일한 종속 체인과 배치 크기에서 직접 비교. 지연시간은 낮을수록, 처리량은 높을수록 좋습니다.</p>
 <div class="grid">$first</div>
-<h2>고수준 연산 보조 비교</h2>
-<p class="lede">현재 하니스에 구현된 Mathematics · DirectXMath · GLM 경로. Vectormath는 고수준 항목이 없어 이 절에서 제외합니다.</p>
+<h2>MSVC · 고수준 연산 비교</h2>
+<p class="lede">Mathematics와 DirectXMath를 같은 입력과 배치 크기로 비교합니다.</p>
 <div class="grid">$second</div>
+<h2>clang-cl · 성능 개선 항목</h2>
+<p class="lede">현재 구현을 DirectXMath와 비교한 값입니다. 이전 버전 대비 개선율은 docs/BASELINE.md §12·§13에 별도로 기록돼 있습니다.</p>
+<div class="grid">$third</div>
 <div class="key">$Key</div>
 <div class="foot">$foot</div>
 </div>
@@ -364,39 +320,42 @@ $htmlFull = [System.IO.Path]::GetFullPath($HtmlPath)
 
 $msvc = Get-BenchmarkMedians -Path $MsvcJson
 $clang = Get-BenchmarkMedians -Path $ClangJson
-$panels = Set-PanelNotes (Build-Panels -M $msvc)
+$panels = @(Build-Panels -Run $msvc)
+$clangPanels = @(Build-ClangPanels -Run $clang)
 
-foreach ($panel in $panels) {
+foreach ($panel in @($panels) + @($clangPanels)) {
     $bars = ($panel.Bars | ForEach-Object { '{0}={1}' -f $_.Label, ($panel.Format -f $_.Value) }) -join '  '
     Write-Host ('{0,-32} {1}' -f $panel.Title, $bars)
     Write-Host ('{0,-32} -> {1}' -f '', $panel.Note)
 }
 $worst = $msvc.GetEnumerator() | Sort-Object { $_.Value.Cv } -Descending | Select-Object -First 1
 Write-Host ''
-Write-Host ('MSVC worst CV: {0} {1:F1}%' -f $worst.Key, $worst.Value.Cv)
+Write-Host ('MSVC worst wall-clock CV: {0} {1:F1}%' -f $worst.Key, $worst.Value.Cv)
+$clangWorst = $clang.GetEnumerator() | Sort-Object { $_.Value.Cv } -Descending | Select-Object -First 1
+Write-Host ('clang-cl worst wall-clock CV: {0} {1:F1}%' -f $clangWorst.Key, $clangWorst.Value.Cv)
 
 $context = (Get-Content -LiteralPath $MsvcJson -Raw | ConvertFrom-Json).context
 $measured = ([datetime]$context.date).ToString('yyyy-MM-dd')
-$meta = "Intel Core i7-8700K · Windows 11 · MSVC 19.51 · C++23 · /O2 /arch:AVX2 /fp:fast · CPU time 중앙값 · $measured 측정"
-$key = '<b>핵심:</b> Mathematics는 matrix4x4 inverse {0:F1} M/s와 multiply {1:F1} M/s로 이 측정의 선두이고, 저수준 지연 항목은 네 라이브러리가 모두 동률권입니다.' -f `
-    (Get-Metric -Run $msvc -Name 'bm_mathematics_matrix4x4_inverse' -As 'Mps'),
-    (Get-Metric -Run $msvc -Name 'bm_mathematics_matrix4x4_multiply_throughput' -As 'Mps')
+$clangMeasured = ([datetime](Get-Content -LiteralPath $ClangJson -Raw | ConvertFrom-Json).context.date).ToString('yyyy-MM-dd')
+$meta = "Intel Core i7-8700K · Windows 11 · MSVC 19.51 / clang-cl 22.1.3 · C++23 · /O2 /arch:AVX2 /fp:fast · 벽시계 중앙값 · MSVC $measured / clang $clangMeasured"
+$key = '<b>현재 구현:</b> clang-cl에서 Mathematics의 matrix4x4 곱 지연은 DX 대비 {0:+0.0;-0.0;+0.0}%, slerp 처리량은 {1:+0.0;-0.0;+0.0}%입니다. 컴파일러별 같은 실행 안에서 비교한 값입니다.' -f `
+    (Get-Percent (Get-Metric -Run $clang -Name 'bm_mathematics_matrix4x4_multiply_latency' -As 'Ns') (Get-Metric -Run $clang -Name 'bm_dx_math_matrix4x4_multiply_latency' -As 'Ns')),
+    (Get-Percent (Get-Metric -Run $clang -Name 'bm_mathematics_quaternion_slerp' -As 'Mps') (Get-Metric -Run $clang -Name 'bm_dx_math_quaternion_slerp' -As 'Mps'))
 
 $footnotes = @(
-    ('측정: Google Benchmark 1.9.0, 무작위 인터리빙 9회 반복, <code>--benchmark_min_time=0.4s</code>. ' +
-     '게이트 전 처리량 벤치 1회 예열 — 이 기계는 저전력 상태에서 시작하면 측정 중 클럭이 올라 CV가 20%까지 뜁니다.')
-    ('버전: GLM 1.0.1, Vectormath 7105ef3, DirectXMath Windows SDK 10.0.26100. ' +
-     'GLM은 <code>GLM_FORCE_INTRINSICS</code>와 <code>GLM_FORCE_ALIGNED_GENTYPES</code>를 켠 상태입니다.')
+    ('측정: Google Benchmark 1.9.0, 무작위 인터리빙 9회 반복, <code>--benchmark_min_time=0.4s</code>, 처리량 벤치 2초 예열. ' +
+     '지연은 real_time 중앙값, 처리량은 배치 크기 / real_time입니다. Windows CPU 시간의 양자화를 피합니다. ' +
+     '최대 CV: MSVC {0:F1}%, clang-cl {1:F1}%.' -f $worst.Value.Cv, $clangWorst.Value.Cv)
+    ('기준: DirectXMath Windows SDK 10.0.26100. 두 컴파일러의 측정은 순차 실행했습니다. ' +
+     'normalize의 퇴화 입력 계약은 precise 모드 기준이며, 이 도표는 fast 모드의 성능입니다.')
     ('모든 처리량 벤치는 입력과 출력을 한 공유 아레나에 페이지 고정 오프셋으로 배치합니다. ' +
      '독립 할당 시 4K 앨리어싱이 바이너리 배치에 따라 최대 29포인트의 거짓 격차를 만들었습니다.')
-    ('clang-cl 22.1.3 대조: inverse {0:F1} 대 {1:F1} M/s, quaternion multiply {2:F1} 대 {3:F1} M/s. 컴파일러별 전체 표는 docs/BASELINE.md에 있습니다.' -f
-        (Get-Metric -Run $clang -Name 'bm_mathematics_matrix4x4_inverse' -As 'Mps'),
-        (Get-Metric -Run $clang -Name 'bm_dx_math_matrix4x4_inverse' -As 'Mps'),
-        (Get-Metric -Run $clang -Name 'bm_mathematics_quaternion_multiply_throughput' -As 'Mps'),
-        (Get-Metric -Run $clang -Name 'bm_dx_math_quaternion_multiply_throughput' -As 'Mps'))
+    (('주의: clang-cl 배치 정점 변환 처리량은 DX 대비 {0:+0.0;-0.0;+0.0}%였습니다. 코드 배치에 따른 변동과 비대칭 비교이며 docs/OPEN-ISSUES.md §4에 기록돼 있습니다. ' +
+     'clang의 fast math에는 <code>-fno-finite-math-only</code>를 추가합니다.') -f
+        (Get-Percent (Get-Metric -Run $clang -Name 'bm_mathematics_transform_point_stream' -As 'Mps') (Get-Metric -Run $clang -Name 'bm_dx_math_transform_coord_stream' -As 'Mps')))
 )
 
-$html = New-ChartHtml -Panels $panels -Meta $meta -Key $key -Footnotes $footnotes -PageWidth $Width
+$html = New-ChartHtml -Panels $panels -ClangPanels $clangPanels -Meta $meta -Key $key -Footnotes $footnotes -PageWidth $Width
 $htmlDirectory = Split-Path -Parent $htmlFull
 if ($htmlDirectory -and -not (Test-Path -LiteralPath $htmlDirectory)) {
     New-Item -ItemType Directory -Path $htmlDirectory -Force | Out-Null

@@ -7,7 +7,7 @@ DirectXMath급 성능과 예측 가능한 규약을 목표로 하는 C++20/23 �
 헤더 온리이며 x64의 SSE2/AVX2, ARM64의 NEON, 이식성 검증을 위한 스칼라 폴백을 지원한다.
 
 > **1.0.1:** 릴리스 기준인 "성능 표 전 항목 DirectXMath 대비 ±5%"를 기준 기계에서
-> MSVC 19.44(Visual Studio 2022)·19.51과 clang-cl 모두 통과했다. 판정은 [PLAN](docs/PLAN.md), 측정치는
+> 2026-09-23 판정 당시 MSVC 19.44(Visual Studio 2022)·19.51과 clang-cl 모두 통과했다. 판정은 [PLAN](docs/PLAN.md), 측정치는
 > [BASELINE](docs/BASELINE.md), 변경 내역은 [CHANGELOG](CHANGELOG.md)에 있다.
 > 1.0.0부터 공개 API의 호환성은 주 버전이 보증한다.
 
@@ -336,14 +336,21 @@ CI의 성능 게이트는 회귀 탐지선이다. 호스티드 러너의 CPU가 
 
 ## 대표 성능
 
-아래 도표는 Intel Core i7-8700K, MSVC C++23, AVX2/FMA 환경에서 Mathematics,
-DirectXMath, GLM, Vectormath를 같은 하니스로 측정한 결과다. 절대 수치보다 동일
-머신·동일 컴파일러에서의 상대 비교를 봐야 한다. 이미지를 누르면 원본 크기로 볼 수 있다.
+아래 도표는 2026-09-28의 현재 구현을 Intel Core i7-8700K, C++23, AVX2/FMA 환경에서
+9회 반복 측정한 벽시계 중앙값이다. MSVC 19.51과 clang-cl 22.1.3에서 Mathematics와
+DirectXMath를 비교했으며, clang-cl의 `normalize`, 행렬 곱과 `slerp`를 별도 절에 표시했다.
+절대 수치보다 동일 머신·동일 컴파일러에서의 상대 비교를 봐야 한다.
+이미지를 누르면 원본 크기로 볼 수 있다.
 
-[![Mathematics와 DirectXMath, GLM, Vectormath 성능 비교](docs/assets/performance-comparison.png)](docs/assets/performance-comparison.png)
+[![MSVC와 clang-cl에서 Mathematics와 DirectXMath의 성능 비교](docs/assets/performance-comparison.png)](docs/assets/performance-comparison.png)
+
+그래프의 원본 JSON은 [MSVC](docs/benchmarks/2026-09-28-msvc.json)와
+[clang-cl](docs/benchmarks/2026-09-28-clang.json)에 보관했다.
+clang-cl의 배치 정점 변환은 이번 측정에서 DirectXMath보다 12.5% 낮았다.
+코드 배치에 따라 변동하는 [열린 항목](docs/OPEN-ISSUES.md) §4다.
 
 재현 명령, 전체 표, 컴파일러별 차이는 [BASELINE](docs/BASELINE.md)에 기록돼 있다.
-clang-cl 행렬 곱과 slerp를 DirectXMath 수준으로 끌어올린 과정은 그 문서의 §12에 있다. 저수준 코드 생성 비교는
+clang-cl 행렬 곱과 `slerp`의 개선 과정은 §12, `normalize`와 구형 MSVC 적재 개선은 §13에 있다. 저수준 코드 생성 비교는
 [SPIKE-RESULTS](docs/SPIKE-RESULTS.md)를 참조한다.
 
 ## 저장소 구조

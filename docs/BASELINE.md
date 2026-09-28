@@ -1221,6 +1221,45 @@ v는 대개 스칼라 레지스터 셋에 들어 있으니 흘렸다가 다시 �
 
 ---
 
+## 15. README 성능 도표 갱신 (2026-09-28)
+
+현재 구현(`a52c334`)을 i7-8700K에서 다시 빌드해 측정했다. MSVC 19.51.36252.0과
+clang-cl 22.1.3의 Release 테스트는 각각 390/390 통과했다. C++23, AVX2/FMA,
+`/O2 /fp:fast`이며 clang에는 `-fno-finite-math-only`를 추가한다.
+처리량 벤치로 2초 예열한 뒤 `0.4s` 최소 시간, 9회 무작위 교차 반복을 사용했다.
+
+기존 도표는 2026-08-25의 CPU 시간과 `items_per_second`를 그대로 썼다. 이제 지연은
+`real_time` 중앙값, 처리량은 배치 크기를 `real_time`으로 나눈 값이다. §11에서 확인한
+Windows CPU 시간 양자화를 도표에서도 제거했다. 막대와 캡션은 같은 JSON에서 계산하며,
+벽시계 CV가 10%를 넘는 표본은 이미지 생성 전에 거부한다.
+
+도표는 MSVC와 clang-cl에서 Mathematics와 DirectXMath를 비교한다.
+clang-cl의 `normalize`, 행렬 곱 처리량·지연, `slerp`는 별도 절에 표시한다.
+이 도표는 현재 구현과 DirectXMath의 비교다. 이전 구현 대비 개선율은 §12·§13의 전후 기록이다.
+
+도표를 위해 GLM·Vectormath까지 포함한 추가 측정도 두 번 시도했지만, 최대 벽시계 CV가
+30.0%와 24.7%로 불안정했다. 도표에는 앞서 안정적으로 측정한 DirectXMath 비교 표본을
+사용했다. 최대 CV는 MSVC 3.71%, clang-cl 7.46%다. GLM·Vectormath의 과거 비교는
+이 문서의 이전 절에 날짜와 측정 조건을 붙여 보존했다.
+
+clang-cl의 행렬 곱 지연은 5.218 대 5.989ns로 12.9% 낮고, `slerp` 처리량은
+70.566 대 43.650 M/s로 61.7% 높다. 배치 정점 변환은 1047.233 대 1197.508 M/s로
+12.5% 낮았다(CV 7.46% 대 0.69%). §13과 [OPEN-ISSUES §4](OPEN-ISSUES.md)의
+코드 배치 변동 범위 안이며, 이 측정으로 전 항목의 릴리스 기준 통과를 다시 선언하지 않는다.
+
+도표의 원본은 [MSVC JSON](benchmarks/2026-09-28-msvc.json)과
+[clang-cl JSON](benchmarks/2026-09-28-clang.json)에 보관했다. 두 JSON 모두 16개 비교 항목의
+양쪽 구현을 담는다. 저장된 표본으로 도표를
+재생성하는 명령은 다음과 같다.
+
+```powershell
+.\scripts\make_performance_chart.ps1 `
+    -MsvcJson docs\benchmarks\2026-09-28-msvc.json `
+    -ClangJson docs\benchmarks\2026-09-28-clang.json
+```
+
+---
+
 ## 재현
 
 ```bash
